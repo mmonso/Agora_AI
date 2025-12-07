@@ -202,7 +202,11 @@ export const LOADING_MESSAGES = [
 export const THEMES: { id: ThemeId; label: string; color: string }[] = [
   { id: 'sand', label: 'Areia (Claro)', color: '#fafaf9' },
   { id: 'autumn', label: 'Outono', color: '#fff7ed' },
+  { id: 'rose', label: 'Rose (Porcelana)', color: '#fff1f2' },
+  { id: 'nordic', label: 'Nordic (Gelo)', color: '#f8fafc' },
   { id: 'dark', label: 'Dark (Neutral)', color: '#09090b' },
+  { id: 'midnight', label: 'Midnight (Azul)', color: '#0f172a' },
   { id: 'eco', label: 'Eco', color: '#064e3b' },
+  { id: 'mystic', label: 'Mystic (Roxo)', color: '#2e1065' },
   { id: 'hitech', label: 'Hi-Tech', color: '#000000' },
 ];

@@ -47,6 +47,6 @@ export interface Project {
 
 export type ConversationStatus = 'idle' | 'active' | 'paused' | 'thinking';
 
-export type ThemeId = 'sand' | 'autumn' | 'dark' | 'eco' | 'hitech';
+export type ThemeId = 'sand' | 'autumn' | 'dark' | 'eco' | 'hitech' | 'midnight' | 'nordic' | 'mystic' | 'rose';
 
 export type AppView = 'dashboard' | 'chat';
