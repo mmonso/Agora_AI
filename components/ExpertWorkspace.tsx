@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { PersonaConfig, Project, ThemeId, Toast } from '../types';
 import { ChatSession } from './ChatSession';
@@ -46,7 +45,7 @@ export const ExpertWorkspace: React.FC<ExpertWorkspaceProps> = ({
     .filter(p => p.mode === 'chat')
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 
-  const availablePersonas = Object.values(personas).filter(p => p.id !== 'user');
+  const availablePersonas = (Object.values(personas) as PersonaConfig[]).filter(p => p.id !== 'user');
   
   const filteredPersonas = availablePersonas.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 

@@ -316,20 +316,20 @@ export const INITIAL_PROJECTS: Project[] = [
 ];
 
 export const COLOR_OPTIONS = [
-  { label: 'Rose (Freud)', bg: 'bg-rose-900', border: 'border-rose-900', text: 'text-rose-950' },
-  { label: 'Índigo (Jung)', bg: 'bg-indigo-900', border: 'border-indigo-900', text: 'text-indigo-950' },
-  { label: 'Slate (Lacan)', bg: 'bg-slate-800', border: 'border-slate-800', text: 'text-slate-900' },
-  { label: 'Esmeralda (Skinner)', bg: 'bg-emerald-700', border: 'border-emerald-700', text: 'text-emerald-900' },
-  { label: 'Teal (Linehan)', bg: 'bg-teal-600', border: 'border-teal-600', text: 'text-teal-900' },
-  { label: 'Lime (Hayes)', bg: 'bg-lime-700', border: 'border-lime-700', text: 'text-lime-900' },
-  { label: 'Azul (Beck)', bg: 'bg-blue-600', border: 'border-blue-600', text: 'text-blue-900' },
-  { label: 'Sky (Young)', bg: 'bg-sky-700', border: 'border-sky-700', text: 'text-sky-900' },
-  { label: 'Ciano (Ellis)', bg: 'bg-cyan-700', border: 'border-cyan-700', text: 'text-cyan-900' },
-  { label: 'Laranja (Perls)', bg: 'bg-orange-700', border: 'border-orange-700', text: 'text-orange-900' },
-  { label: 'Amarelo (Rogers)', bg: 'bg-yellow-600', border: 'border-yellow-600', text: 'text-yellow-900' },
-  { label: 'Âmbar (Frankl/Zen)', bg: 'bg-amber-600', border: 'border-amber-600', text: 'text-amber-900' },
-  { label: 'Pedra (Nagarjuna)', bg: 'bg-stone-600', border: 'border-stone-600', text: 'text-stone-900' },
-  { label: 'Vermelho (Tibete)', bg: 'bg-red-700', border: 'border-red-700', text: 'text-red-100' },
+  { label: 'Rose', bg: 'bg-rose-900', border: 'border-rose-900', text: 'text-rose-950' },
+  { label: 'Índigo', bg: 'bg-indigo-900', border: 'border-indigo-900', text: 'text-indigo-950' },
+  { label: 'Slate', bg: 'bg-slate-800', border: 'border-slate-800', text: 'text-slate-900' },
+  { label: 'Esmeralda', bg: 'bg-emerald-700', border: 'border-emerald-700', text: 'text-emerald-900' },
+  { label: 'Teal', bg: 'bg-teal-600', border: 'border-teal-600', text: 'text-teal-900' },
+  { label: 'Lime', bg: 'bg-lime-700', border: 'border-lime-700', text: 'text-lime-900' },
+  { label: 'Azul', bg: 'bg-blue-600', border: 'border-blue-600', text: 'text-blue-900' },
+  { label: 'Sky', bg: 'bg-sky-700', border: 'border-sky-700', text: 'text-sky-900' },
+  { label: 'Ciano', bg: 'bg-cyan-700', border: 'border-cyan-700', text: 'text-cyan-900' },
+  { label: 'Laranja', bg: 'bg-orange-700', border: 'border-orange-700', text: 'text-orange-900' },
+  { label: 'Amarelo', bg: 'bg-yellow-600', border: 'border-yellow-600', text: 'text-yellow-900' },
+  { label: 'Âmbar', bg: 'bg-amber-600', border: 'border-amber-600', text: 'text-amber-900' },
+  { label: 'Pedra', bg: 'bg-stone-600', border: 'border-stone-600', text: 'text-stone-900' },
+  { label: 'Vermelho', bg: 'bg-red-700', border: 'border-red-700', text: 'text-red-100' },
 ];
 
 export const INITIAL_MESSAGE_DELAY_MS = 1500;
@@ -361,13 +361,13 @@ export const LOADING_MESSAGES = [
 ];
 
 export const THEMES: { id: ThemeId; label: string; color: string }[] = [
-  { id: 'sand', label: 'Zen (Areia)', color: '#fafaf9' },
-  { id: 'autumn', label: 'Humanista (Outono)', color: '#fff7ed' },
-  { id: 'rose', label: 'Psicanálise (Rose)', color: '#fff1f2' },
-  { id: 'nordic', label: 'Cognitivo (Gelo)', color: '#f8fafc' },
-  { id: 'dark', label: 'Existencial (Dark)', color: '#09090b' },
-  { id: 'midnight', label: 'Profundo (Midnight)', color: '#0f172a' },
-  { id: 'eco', label: 'Behaviorista (Eco)', color: '#064e3b' },
-  { id: 'mystic', label: 'Junguiano (Mystic)', color: '#2e1065' },
-  { id: 'hitech', label: 'Analítico (Hi-Tech)', color: '#000000' },
+  { id: 'sand', label: 'Areia', color: '#fafaf9' },
+  { id: 'autumn', label: 'Outono', color: '#fff7ed' },
+  { id: 'rose', label: 'Rose', color: '#fff1f2' },
+  { id: 'nordic', label: 'Gelo', color: '#f8fafc' },
+  { id: 'dark', label: 'Dark', color: '#09090b' },
+  { id: 'midnight', label: 'Midnight', color: '#0f172a' },
+  { id: 'eco', label: 'Eco', color: '#064e3b' },
+  { id: 'mystic', label: 'Mystic', color: '#2e1065' },
+  { id: 'hitech', label: 'Hi-Tech', color: '#000000' },
 ];
