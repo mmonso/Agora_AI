@@ -54,6 +54,7 @@ export type ProjectMode = 'council' | 'chat';
 
 export interface Project {
   id: string;
+  ownerId?: string; // ID do dispositivo/usuário para "login invisível"
   title: string;
   description: string; // Context/Objective
   createdAt: number;

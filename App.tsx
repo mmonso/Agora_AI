@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { PersonaConfig, Project, Toast, ThemeId, AppView } from './types';
-import { INITIAL_PERSONAS, USER_ID, THEMES } from './constants';
+import { INITIAL_PERSONAS, THEMES } from './constants';
 import { storageService } from './services/storageService';
 import { firebaseConfig } from './firebaseConfig';
 import { Dashboard } from './components/Dashboard';
@@ -9,10 +9,16 @@ import { ProjectWizard } from './components/ProjectWizard';
 import { ChatSession } from './components/ChatSession';
 import { GlobalPersonaManager } from './components/GlobalPersonaManager';
 import { ExpertWorkspace } from './components/ExpertWorkspace';
+import { LoginScreen } from './components/LoginScreen';
+import { User } from 'firebase/auth';
 
 const App: React.FC = () => {
+  // --- Auth State ---
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
+
   // --- Loading State ---
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false); // Data loading
   const [connectionError, setConnectionError] = useState<{isError: boolean, msg: string}>({ isError: false, msg: '' });
 
   // --- Global App State ---
@@ -37,32 +43,27 @@ const App: React.FC = () => {
 
   const activeProject = projects.find(p => p.id === currentProjectId);
   
-  // CHECK CONFIGURATION (Chave de exemplo vs Real)
+  // CHECK CONFIGURATION
   const isFirebaseConfigured = firebaseConfig.apiKey !== "SUA_API_KEY_AQUI";
 
-  // --- INITIAL DATA LOADING ---
+  // --- INITIAL DATA LOADING (After Auth) ---
   const loadData = async () => {
     setIsLoading(true);
     setConnectionError({ isError: false, msg: '' });
     
     try {
-      // Verificar conexão primeiro
-      const status = await storageService.checkConnection();
-      if (!status.online) {
-          let errorMsg = "Banco de dados não detectado.";
-          if (status.error?.includes('permission-denied')) {
-              errorMsg = "ERRO DE PERMISSÃO: O banco está no 'Modo Produção'. Mude para 'Modo Teste' no Console Firebase.";
-          } else if (status.error?.includes('not-found') || status.error?.includes('unavailable') || status.error?.includes('failed-precondition')) {
-              errorMsg = "Banco de dados não encontrado ou índices ausentes. Aguarde alguns instantes.";
-          } else {
-             errorMsg = `Erro de Conexão: ${status.error}. Verifique sua internet ou console.`;
+      // Verificar conexão
+      if (isFirebaseConfigured) {
+          const status = await storageService.checkConnection();
+          if (!status.online) {
+             console.warn("Offline/Error:", status.error);
+             if (status.error?.includes('permission')) {
+                 setConnectionError({ isError: true, msg: status.error });
+             }
           }
-          setConnectionError({ isError: true, msg: errorMsg });
-          addToast("Modo Offline / Erro de Conexão", "error");
-      } else {
-          addToast("Conectado ao Banco de Dados!", "info");
       }
 
+      // Carrega dados (storageService usa User UID)
       const [loadedTheme, loadedPersonas, loadedOrder, loadedProjects] = await Promise.all([
         storageService.getTheme(),
         storageService.getPersonas(),
@@ -77,19 +78,39 @@ const App: React.FC = () => {
       setProjects(loadedProjects);
     } catch (error) {
       console.error("Failed to load initial data", error);
-      addToast("Erro crítico ao carregar dados.", "error");
+      addToast("Erro ao carregar dados.", "error");
     } finally {
       setIsLoading(false);
     }
   };
 
+  // --- AUTH FLOW ---
   useEffect(() => {
-    if (!isFirebaseConfigured) {
-        setIsLoading(false);
-        return;
-    }
-    loadData();
-  }, [isFirebaseConfigured]);
+    const unsubscribe = storageService.initAuth((user) => {
+      setCurrentUser(user);
+      setAuthInitialized(true);
+      
+      if (user) {
+        // Se usuário detectado (sessão persistente), carrega dados
+        loadData();
+      } else {
+        // Load only the theme if no user (for login screen aesthetics)
+        storageService.getTheme().then(theme => {
+            setDashboardTheme(theme);
+            setActiveTheme(theme);
+        });
+      }
+    });
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    await storageService.logout();
+    setCurrentUser(null);
+    setView('dashboard');
+  };
 
   // --- Effects ---
   useEffect(() => {
@@ -156,7 +177,7 @@ const App: React.FC = () => {
       setEditingProject(null);
     } catch (e) {
       console.error(e);
-      addToast("Erro ao salvar! Verifique conexão com Firebase.", "error");
+      addToast("Erro ao salvar! (Tentando localmente)", "error");
     }
   };
   
@@ -193,7 +214,7 @@ const App: React.FC = () => {
         setCurrentProjectId(newProject.id);
         setView('expert-home'); 
       } catch (e) {
-        addToast("Erro ao criar chat. Firestore indisponível?", "error");
+        addToast("Erro ao criar chat.", "error");
       }
   };
 
@@ -251,7 +272,7 @@ const App: React.FC = () => {
       await storageService.savePersonas(newPersonas);
       addToast(`Persona "${persona.name}" salva`, 'info');
     } catch (e) {
-      addToast("Erro ao salvar persona no banco.", "error");
+      addToast("Erro ao salvar persona.", "error");
     }
   };
 
@@ -276,22 +297,30 @@ const App: React.FC = () => {
   };
 
   // --- RENDER ---
-  if (!isFirebaseConfigured) {
-      return (
-          <div className="flex items-center justify-center min-h-screen bg-stone-900 text-stone-100 p-6 font-sans">
-              <div className="max-w-xl text-center">
-                  <h1 className="text-2xl font-bold mb-4">Configuração Necessária</h1>
-                  <p className="text-stone-400">Edite o arquivo <code>firebaseConfig.ts</code> com suas chaves.</p>
-              </div>
-          </div>
-      );
+
+  // 1. Splash Screen while checking auth
+  if (!authInitialized) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-main text-body flex-col gap-4">
+        <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
   }
 
+  // 2. Login Screen (Strict)
+  if (!currentUser) {
+    return <LoginScreen 
+            currentTheme={activeTheme}
+            onSetTheme={handleDashboardThemeChange}
+           />;
+  }
+
+  // 3. Data Loading Screen
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-main text-body flex-col gap-4">
         <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
-        <p className="animate-pulse">Conectando ao Firebase...</p>
+        <p className="animate-pulse">Sincronizando Mentes...</p>
       </div>
     );
   }
@@ -301,17 +330,11 @@ const App: React.FC = () => {
       
       {/* Global Connection Warning */}
       {connectionError.isError && (
-          <div className="bg-red-600 text-white px-4 py-3 text-center text-sm font-bold z-[101] shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4 animate-in slide-in-from-top-full duration-300">
+          <div className="bg-amber-600 text-white px-4 py-2 text-center text-xs font-bold z-[101] shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4 animate-in slide-in-from-top-full duration-300">
               <div className="flex items-center gap-2">
-                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                  <span>{connectionError.msg}</span>
               </div>
-              <button 
-                onClick={loadData}
-                className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-md text-xs font-bold uppercase tracking-wider transition-colors border border-white/40"
-              >
-                Tentar Conectar Novamente
-              </button>
           </div>
       )}
       
@@ -327,9 +350,24 @@ const App: React.FC = () => {
       </div>
 
       {(view === 'dashboard' || (view === 'expert-home' && !activeProject)) && (
-        <header className="fixed top-0 right-0 p-4 z-30 flex justify-end pointer-events-none">
+        <header className="fixed top-0 right-0 p-4 z-30 flex justify-end pointer-events-none gap-2">
+          
+          {/* User Profile / Logout */}
+          <div className="pointer-events-auto flex items-center gap-2 bg-card border border-border rounded-lg shadow-sm p-1">
+             <div className="w-8 h-8 rounded-full bg-accent text-accent-fg flex items-center justify-center font-bold text-xs overflow-hidden">
+                {currentUser?.photoURL ? (
+                    <img src={currentUser.photoURL} alt="User" className="w-full h-full object-cover" />
+                ) : (
+                    currentUser?.email?.charAt(0).toUpperCase() || (currentUser?.displayName?.charAt(0).toUpperCase() || 'U')
+                )}
+             </div>
+             <button onClick={handleLogout} className="p-1.5 text-muted hover:text-red-500 rounded-md transition-colors" title="Sair">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+             </button>
+          </div>
+
           <div className="relative pointer-events-auto" ref={themeMenuRef}>
-            <button onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)} className="p-2 text-muted hover:text-body hover:bg-hover rounded-lg transition-colors bg-card border border-border shadow-sm">
+            <button onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)} className="p-2 text-muted hover:text-body hover:bg-hover rounded-lg transition-colors bg-card border border-border shadow-sm h-full">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" /></svg>
             </button>
             {isThemeMenuOpen && (
