@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import Markdown from 'react-markdown';
 import { Message, PersonaConfig } from '../types';
+import { ActionPlanCard } from './ActionPlanCard';
 
 interface ChatMessageProps {
   message: Message;
@@ -10,11 +11,26 @@ interface ChatMessageProps {
   onReply?: (message: Message) => void;
   onEdit?: (messageId: string, newText: string) => void;
   onRegenerate?: (messageId: string) => void;
+  onActionToggle?: (messageId: string, itemId: string) => void;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, persona, isUser, onReply, onEdit, onRegenerate }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = ({ message, persona, isUser, onReply, onEdit, onRegenerate, onActionToggle }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
+  const [showReasoning, setShowReasoning] = useState(false);
+
+  // --- SYSTEM MESSAGE RENDERER ---
+  if (message.type === 'system') {
+      return (
+          <div className="flex w-full mb-6 justify-center animate-in fade-in zoom-in-95 duration-500">
+              <div className="bg-hover/50 border border-border/50 px-4 py-1.5 rounded-full text-xs text-muted font-medium uppercase tracking-widest flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-accent/50"></span>
+                  {message.text}
+                  <span className="w-2 h-2 rounded-full bg-accent/50"></span>
+              </div>
+          </div>
+      );
+  }
 
   const displayPersona = persona || {
     name: 'Desconhecido',
@@ -52,13 +68,36 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, persona, isUs
           )}
         </div>
 
-        {/* Bubble */}
+        {/* Bubble Container */}
         <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} min-w-0 relative flex-1`}>
-          <span className="text-xs text-muted mb-1 px-1 flex items-center gap-2">
-            <span className="font-medium">{displayPersona.name}</span>
-            {!isUser && <span className="opacity-50">•</span>}
-            {!isUser && <span className="opacity-70 text-[10px] uppercase tracking-wider">{displayPersona.role}</span>}
-          </span>
+          
+          {/* Metadata & Reasoning */}
+          <div className={`flex flex-col mb-1 ${isUser ? 'items-end' : 'items-start'}`}>
+            <span className="text-xs text-muted px-1 flex items-center gap-2 select-none">
+                <span className="font-medium">{displayPersona.name}</span>
+                {!isUser && <span className="opacity-50">•</span>}
+                {!isUser && <span className="opacity-70 text-[10px] uppercase tracking-wider">{displayPersona.role}</span>}
+                
+                 {/* Reasoning Toggle Button */}
+                 {message.reasoning && !isUser && (
+                   <button 
+                     onClick={() => setShowReasoning(!showReasoning)}
+                     className={`ml-1 p-0.5 rounded transition-colors ${showReasoning ? 'text-accent bg-accent/10' : 'text-muted/40 hover:text-accent hover:bg-accent/5'}`}
+                     title={showReasoning ? "Ocultar raciocínio" : "Ver raciocínio do moderador"}
+                   >
+                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 017 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z"/></svg>
+                   </button>
+                )}
+            </span>
+            
+            {/* Reasoning Display (Collapsible) */}
+            {message.reasoning && !isUser && showReasoning && (
+                <div className="mt-1 mb-1 px-3 py-2 bg-accent/5 rounded-lg text-[10px] text-muted border border-accent/10 flex items-start gap-2 max-w-md animate-in fade-in slide-in-from-top-1 origin-top">
+                    <span className="shrink-0 text-xs mt-0.5">🧠</span>
+                    <span className="italic leading-relaxed opacity-90">{message.reasoning}</span>
+                </div>
+            )}
+          </div>
           
           <div className={`
             p-3 md:p-5 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed transition-colors duration-200 break-words w-full relative
@@ -97,37 +136,48 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, persona, isUs
                     </div>
                 </div>
             ) : (
-                message.text && (
-                <Markdown
-                    components={{
-                    p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
-                    a: ({node, ...props}) => (
-                        <a className="underline decoration-1 underline-offset-2 opacity-80 hover:opacity-100" target="_blank" rel="noopener noreferrer" {...props} />
-                    ),
-                    ul: ({node, ...props}) => <ul className="list-disc list-outside ml-4 mb-2 space-y-1" {...props} />,
-                    ol: ({node, ...props}) => <ol className="list-decimal list-outside ml-4 mb-2 space-y-1" {...props} />,
-                    li: ({node, ...props}) => <li className="pl-1" {...props} />,
-                    blockquote: ({node, ...props}) => (
-                        <blockquote className="border-l-4 border-border pl-3 italic mb-2 my-2 py-1 bg-hover/50 opacity-80" {...props} />
-                    ),
-                    strong: ({node, ...props}) => <strong className="font-bold opacity-100" {...props} />,
-                    em: ({node, ...props}) => <em className="italic opacity-90" {...props} />,
-                    pre: ({node, ...props}) => (
-                        <pre className="block p-3 rounded-lg font-mono text-xs overflow-x-auto my-2 border border-border bg-hover/50" {...props} />
-                    ),
-                    code: ({node, className, children, ...props}) => {
-                        const isBlock = /language-(\w+)/.exec(className || '');
-                        return (
-                        <code className={`${!isBlock ? 'px-1.5 py-0.5 rounded font-mono text-xs bg-hover/50' : 'font-mono text-xs'}`} {...props}>
-                            {children}
-                        </code>
-                        );
-                    }
-                    }}
-                >
-                    {message.text}
-                </Markdown>
-                )
+                <>
+                    {message.text && (
+                        <Markdown
+                            components={{
+                            p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                            a: ({node, ...props}) => (
+                                <a className="underline decoration-1 underline-offset-2 opacity-80 hover:opacity-100" target="_blank" rel="noopener noreferrer" {...props} />
+                            ),
+                            ul: ({node, ...props}) => <ul className="list-disc list-outside ml-4 mb-2 space-y-1" {...props} />,
+                            ol: ({node, ...props}) => <ol className="list-decimal list-outside ml-4 mb-2 space-y-1" {...props} />,
+                            li: ({node, ...props}) => <li className="pl-1" {...props} />,
+                            blockquote: ({node, ...props}) => (
+                                <blockquote className="border-l-4 border-border pl-3 italic mb-2 my-2 py-1 bg-hover/50 opacity-80" {...props} />
+                            ),
+                            strong: ({node, ...props}) => <strong className="font-bold opacity-100" {...props} />,
+                            em: ({node, ...props}) => <em className="italic opacity-90" {...props} />,
+                            pre: ({node, ...props}) => (
+                                <pre className="block p-3 rounded-lg font-mono text-xs overflow-x-auto my-2 border border-border bg-hover/50" {...props} />
+                            ),
+                            code: ({node, className, children, ...props}) => {
+                                const isBlock = /language-(\w+)/.exec(className || '');
+                                return (
+                                <code className={`${!isBlock ? 'px-1.5 py-0.5 rounded font-mono text-xs bg-hover/50' : 'font-mono text-xs'}`} {...props}>
+                                    {children}
+                                </code>
+                                );
+                            }
+                            }}
+                        >
+                            {message.text}
+                        </Markdown>
+                    )}
+                    
+                    {/* Render Action Plan if exists */}
+                    {message.actionPlan && onActionToggle && (
+                        <ActionPlanCard 
+                           plan={message.actionPlan} 
+                           onToggle={(itemId) => onActionToggle(message.id, itemId)} 
+                           isUser={isUser} 
+                        />
+                    )}
+                </>
             )}
             
             {/* Action Buttons (Reply, Edit, Regenerate) */}
