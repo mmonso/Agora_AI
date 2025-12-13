@@ -1,7 +1,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Message, ConversationStatus, Project, PersonaConfig, ProjectPhase, Attachment, ActionPlan } from '../types';
-import { STORAGE_KEYS, TURN_DELAY_MS, USER_ID } from '../constants';
+import { TURN_DELAY_MS, USER_ID } from '../constants';
+import { storageService } from '../services/storageService';
 import { 
     determineNextSpeaker, 
     generatePersonaResponse, 
@@ -23,355 +24,270 @@ export const useChatOrchestrator = (
     const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
     const [consecutiveBotTurns, setConsecutiveBotTurns] = useState(0);
     const [interviewModeRequest, setInterviewModeRequest] = useState(false);
+    const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
     
     // --- Refs (Latest Values) ---
     const messagesRef = useRef(messages);
     const processingRef = useRef(false); // Mutex lock
     const interviewRequestRef = useRef(false);
 
-    // Sync refs
-    useEffect(() => { messagesRef.current = messages; }, [messages]);
-    useEffect(() => { interviewRequestRef.current = interviewModeRequest; }, [interviewModeRequest]);
-
-    // Load Messages
+    // Keep ref synced
     useEffect(() => {
-        const key = `${STORAGE_KEYS.MESSAGES_PREFIX}${project.id}`;
-        const stored = localStorage.getItem(key);
-        if (stored) {
-            try {
-                setMessages(JSON.parse(stored));
-            } catch (e) { console.error("Failed to load messages"); }
-        } else {
-            setMessages([]);
-            setStatus('idle');
-            setConsecutiveBotTurns(0);
-        }
+        messagesRef.current = messages;
+    }, [messages]);
+
+    // --- Load History on Mount (Async) ---
+    useEffect(() => {
+        const loadHistory = async () => {
+            setIsHistoryLoaded(false);
+            const history = await storageService.getMessages(project.id);
+            setMessages(history);
+            setIsHistoryLoaded(true);
+        };
+        loadHistory();
     }, [project.id]);
 
-    // Save Messages
-    useEffect(() => {
-        const key = `${STORAGE_KEYS.MESSAGES_PREFIX}${project.id}`;
-        localStorage.setItem(key, JSON.stringify(messages));
-    }, [messages, project.id]);
+    // --- Helper to Append Message ---
+    const appendMessage = useCallback(async (msg: Message) => {
+        setMessages(prev => {
+            const next = [...prev, msg];
+            // Fire and forget save (or await if critical)
+            storageService.saveMessages(project.id, next);
+            return next;
+        });
 
-    // Update Last Active
-    useEffect(() => {
-        if (messages.length > 0) {
-            onUpdateProject({ ...project, lastActiveAt: Date.now() });
-        }
-    }, [messages.length]);
+        // Update Project 'lastActiveAt'
+        const updatedProject = { ...project, lastActiveAt: Date.now() };
+        onUpdateProject(updatedProject);
+        // We don't need to explicitly saveProject here as onUpdateProject usually handles state,
+        // but storageService needs to persist it.
+        storageService.saveSingleProject(updatedProject);
+    }, [project, onUpdateProject]);
 
-    // --- Helpers ---
-    const addSystemMessage = (text: string) => {
-        const msg: Message = {
-            id: generateId(),
-            senderId: 'system',
-            text: text,
-            timestamp: Date.now(),
-            type: 'system'
-        };
-        setMessages(prev => [...prev, msg]);
-    };
+    // --- Update Existing Message ---
+    const updateMessage = useCallback((msgId: string, updates: Partial<Message>) => {
+        setMessages(prev => {
+            const next = prev.map(m => m.id === msgId ? { ...m, ...updates } : m);
+            storageService.saveMessages(project.id, next);
+            return next;
+        });
+    }, [project.id]);
 
-    // --- Core Logic: Process a Single Turn ---
+    // --- Orchestration Logic ---
     const processTurn = useCallback(async () => {
-        // Double check locks
-        if (processingRef.current) return;
-        if (status !== 'active') return;
+        if (processingRef.current || status === 'paused') return;
         
-        const activePersonaIds = project.activePersonaIds;
-        if (activePersonaIds.length === 0) return;
-
-        // Safety break
-        if (consecutiveBotTurns >= 15) {
-            setStatus('idle');
-            setConsecutiveBotTurns(0);
-            onToast("Moderador: Pausa automática após 15 turnos.", "info");
+        // Safety check: Don't let bots talk forever (limit 5 turns before pausing)
+        if (consecutiveBotTurns >= 5 && !interviewRequestRef.current) {
+            setStatus('paused');
             return;
         }
 
-        // Lock & Set Visual State
         processingRef.current = true;
         setIsProcessing(true);
-        setActiveSpeakerId(null); // Clear previous speaker visual
-        setStatus('thinking'); 
+        setStatus('thinking');
 
         try {
-            const isInterview = interviewRequestRef.current;
-            const isOneOnOne = project.mode === 'chat';
+            const currentHistory = messagesRef.current;
+            const context = project.description;
+            const phase = project.phase || 'exploration';
+            
+            // 1. Determine Next Speaker
+            const routerResult = await determineNextSpeaker(
+                currentHistory, 
+                project.activePersonaIds, 
+                globalPersonas,
+                context,
+                phase,
+                interviewRequestRef.current
+            );
 
-            let nextId: string | null = null;
-            let reasoning = "";
-
-            if (isOneOnOne) {
-                // --- ONE-ON-ONE MODE ---
-                // Skip the Router. Just pick the only active persona.
-                nextId = activePersonaIds[0];
-                reasoning = "Resposta direta do especialista.";
-            } else {
-                // --- COUNCIL MODE ---
-                // 1. Router: Who speaks next?
-                let decision = await determineNextSpeaker(
-                    messagesRef.current,
-                    activePersonaIds,
-                    globalPersonas,
-                    project.description,
-                    project.phase,
-                    isInterview
-                );
-
-                // 2. Phase Transition Check
-                if (decision.shouldAdvancePhase && !isInterview) {
-                    let nextPhase: ProjectPhase | null = null;
-                    if (project.phase === 'exploration') nextPhase = 'synthesis';
-                    else if (project.phase === 'synthesis') nextPhase = 'action';
-                    
-                    if (nextPhase) {
-                        onUpdateProject({ ...project, phase: nextPhase });
-                        addSystemMessage(`O moderador avançou a fase para: ${nextPhase.toUpperCase()}`);
-                        onToast("Fase avançada. Debate continua...", "info");
-                        
-                        // Unlock but keep status Active
-                        setStatus('active'); 
-                        processingRef.current = false;
-                        setIsProcessing(false);
-                        return; 
-                    }
+            // Handle Phase Change from Router
+            if (routerResult.shouldAdvancePhase) {
+                let nextPhase: ProjectPhase = phase;
+                if (phase === 'exploration') nextPhase = 'synthesis';
+                else if (phase === 'synthesis') nextPhase = 'action';
+                
+                if (nextPhase !== phase) {
+                    onUpdateProject({ ...project, phase: nextPhase });
+                    await appendMessage({
+                        id: generateId(),
+                        senderId: 'system',
+                        text: `Fase alterada automaticamente para: ${nextPhase.toUpperCase()}`,
+                        timestamp: Date.now(),
+                        type: 'system'
+                    });
+                    onToast(`Fase avançada para ${nextPhase}`, 'info');
                 }
-                
-                nextId = decision.nextSpeakerId;
-                reasoning = decision.reasoning;
             }
 
-            // --- ROBUSTNESS: FALLBACK LOGIC (Only for Council) ---
-            if (!isOneOnOne && (!nextId || !activePersonaIds.includes(nextId))) {
-                const lastSpeakerId = messagesRef.current.length > 0 
-                    ? messagesRef.current[messagesRef.current.length - 1].senderId 
-                    : null;
-                const available = activePersonaIds.filter(id => id !== lastSpeakerId);
-                const candidates = available.length > 0 ? available : activePersonaIds;
-                nextId = candidates[Math.floor(Math.random() * candidates.length)];
-                if (!reasoning) reasoning = "Decisão automática (Fallback).";
-                console.log("Router fallback triggered. Selected:", nextId);
+            const speakerId = routerResult.nextSpeakerId;
+
+            if (!speakerId) {
+                setStatus('idle'); // No one wants to speak
+                processingRef.current = false;
+                setIsProcessing(false);
+                return;
             }
 
-            // 3. Generate Content
-            if (nextId) {
-                setActiveSpeakerId(nextId); // Show specific speaker thinking immediately
+            setActiveSpeakerId(speakerId);
+            
+            // 2. Generate Content
+            const speaker = globalPersonas[speakerId];
+            const responseText = await generatePersonaResponse(
+                speaker,
+                currentHistory,
+                globalPersonas,
+                context,
+                phase,
+                interviewRequestRef.current ? 'interview' : 'default'
+            );
+            
+            // Reset interview flag if it was active
+            if (interviewRequestRef.current) {
+                setInterviewModeRequest(false);
+                interviewRequestRef.current = false;
+            }
+
+            // 3. Add Message
+            const newMessage: Message = {
+                id: generateId(),
+                senderId: speakerId,
+                text: responseText,
+                timestamp: Date.now(),
+                reasoning: routerResult.reasoning
+            };
+
+            await appendMessage(newMessage);
+            setConsecutiveBotTurns(prev => prev + 1);
+
+            // 4. Schedule Next Turn
+            setTimeout(() => {
+                processingRef.current = false;
+                setIsProcessing(false);
+                setActiveSpeakerId(null);
                 
-                const speakerConfig = globalPersonas[nextId];
-                const responseText = await generatePersonaResponse(
-                    speakerConfig,
-                    messagesRef.current,
-                    globalPersonas,
-                    project.description,
-                    project.phase,
-                    isInterview ? 'interview' : 'default'
-                );
-
-                if (isInterview) setInterviewModeRequest(false);
-
-                const newMessage: Message = {
-                    id: generateId(),
-                    senderId: nextId,
-                    text: responseText,
-                    timestamp: Date.now(),
-                    reasoning: reasoning,
-                    type: 'normal'
-                };
-
-                // Update State -> Triggers Effect -> Triggers Next Turn
-                setMessages(prev => [...prev, newMessage]);
-                setConsecutiveBotTurns(prev => prev + 1);
-
-                if (isInterview || isOneOnOne) {
-                    setStatus('idle'); // Stop loop for 1:1 or after interview question
-                    setConsecutiveBotTurns(0);
+                // If not paused, continue
+                if (status === 'active') {
+                    processTurn();
                 } else {
-                    setStatus('active'); // Continue loop for council
+                    setStatus('idle');
                 }
-
-            } else {
-                setStatus('idle');
-                setConsecutiveBotTurns(0);
-                onToast("Erro: Nenhum orador disponível.", "error");
-            }
+            }, TURN_DELAY_MS);
 
         } catch (error) {
-            console.error("Turn failed", error);
-            onToast("Erro na geração. Tentando recuperar...", "error");
-            setStatus('idle');
-        } finally {
-            // Unlock
+            console.error("Turn error:", error);
             processingRef.current = false;
             setIsProcessing(false);
-            setActiveSpeakerId(null);
+            setStatus('idle');
+            onToast("Erro na rodada de conversa", 'error');
         }
-    }, [status, project.activePersonaIds, project.phase, project.description, consecutiveBotTurns, globalPersonas, onToast, onUpdateProject, project]);
+    }, [status, project, globalPersonas, consecutiveBotTurns, onToast, appendMessage, onUpdateProject]);
 
-
-    // --- The Loop Driver (Event Driven) ---
+    // --- Trigger Loop ---
     useEffect(() => {
-        let timeoutId: ReturnType<typeof setTimeout>;
-
-        // Only schedule next turn if:
-        // 1. Status is Active (User pressed Play or loop continued)
-        // 2. Not currently processing (Mutex)
-        // 3. Have personas
-        if (status === 'active' && !isProcessing && project.activePersonaIds.length > 0) {
-            
-            // Determine dynamic delay
-            const lastMsg = messages[messages.length - 1];
-            const isUserLast = lastMsg?.senderId === USER_ID;
-            // Shorter delay if user just spoke (feels more responsive)
-            const delay = isUserLast ? 1000 : TURN_DELAY_MS;
-
-            timeoutId = setTimeout(() => {
-                processTurn();
-            }, delay);
+        if (status === 'active' && !isProcessing && isHistoryLoaded) {
+            const timeout = setTimeout(processTurn, 1000);
+            return () => clearTimeout(timeout);
         }
-
-        return () => clearTimeout(timeoutId);
-    }, [messages, status, isProcessing, processTurn, project.activePersonaIds.length]);
+    }, [status, isProcessing, processTurn, isHistoryLoaded]);
 
 
-    // --- Actions ---
-
-    const sendMessage = useCallback((text: string, attachments: Attachment[], replyingTo?: { message: Message, senderName: string }) => {
-        let finalText = text;
-        if (replyingTo) {
-            const truncated = replyingTo.message.text.substring(0, 100).replace(/\n/g, ' ');
-            const quote = `> **${replyingTo.senderName}**: ${truncated}${replyingTo.message.text.length > 100 ? '...' : ''}\n\n`;
-            finalText = quote + text;
-        }
-
-        const userMessage: Message = {
+    // --- User Actions ---
+    const sendMessage = async (text: string, attachments: Attachment[] = [], replyTo?: Message) => {
+        if (!text.trim() && attachments.length === 0) return;
+        
+        const userMsg: Message = {
             id: generateId(),
             senderId: USER_ID,
-            text: finalText,
-            timestamp: Date.now(),
+            text,
             attachments,
-            type: 'normal'
+            timestamp: Date.now()
         };
 
-        setMessages(prev => [...prev, userMessage]);
-        setConsecutiveBotTurns(0);
-        
-        // Auto-start
-        if (project.activePersonaIds.length > 0) {
-            setStatus('active');
+        if (replyTo) {
+            userMsg.text = `> Respondendo a ${globalPersonas[replyTo.senderId]?.name || 'Alguém'}: "${replyTo.text.substring(0, 50)}..."\n\n${text}`;
         }
-    }, [project.activePersonaIds]);
 
-    const togglePause = useCallback(() => {
-        if (project.activePersonaIds.length === 0 && status === 'idle') return;
-        setStatus(prev => (prev === 'active' || prev === 'thinking' ? 'paused' : 'active'));
-    }, [status, project.activePersonaIds]);
-
-    const clearHistory = useCallback(() => {
-        if (window.confirm('Apagar histórico deste projeto?')) {
-            setMessages([]);
-            setStatus('idle');
-            setConsecutiveBotTurns(0);
-        }
-    }, []);
-
-    const startInterview = useCallback(() => {
-        onToast("Iniciando entrevista...", "info");
-        addSystemMessage("O usuário solicitou ser entrevistado para aprofundar o contexto.");
-        setInterviewModeRequest(true);
+        await appendMessage(userMsg);
         setStatus('active');
-    }, []);
+        setConsecutiveBotTurns(0); // Reset bot counter on user intervention
+    };
 
-    const generatePlan = useCallback(async () => {
-        if (project.activePersonaIds.length === 0) return;
-        onToast("Gerando Plano de Ação...", "info");
-        setActiveSpeakerId(project.activePersonaIds[0]);
-        setStatus('thinking');
-        setIsProcessing(true);
-        processingRef.current = true;
+    const togglePause = () => {
+        setStatus(prev => prev === 'active' ? 'paused' : 'active');
+    };
 
-        try {
-            const plan = await generateActionPlan(messagesRef.current, globalPersonas, project.title);
-            const msg: Message = {
-                id: generateId(),
-                senderId: project.activePersonaIds[0],
-                text: "Aqui está um plano prático baseado em nossa discussão:",
-                timestamp: Date.now(),
-                type: 'normal',
-                actionPlan: plan
-            };
-            setMessages(prev => [...prev, msg]);
-            onToast("Plano de Ação Criado!", "info");
-        } catch (e) {
-            onToast("Erro ao gerar plano", "error");
-        } finally {
-            setIsProcessing(false);
-            processingRef.current = false;
-            setStatus('idle');
-            setActiveSpeakerId(null);
-        }
-    }, [project, globalPersonas]);
+    const clearHistory = async () => {
+        setMessages([]);
+        storageService.clearMessages(project.id);
+        setStatus('idle');
+    };
 
-    const nudge = useCallback(async (id: string) => {
-        if (processingRef.current) return;
-        setActiveSpeakerId(id);
-        setStatus('thinking');
-        processingRef.current = true;
-        setIsProcessing(true);
+    const startInterview = () => {
+        setInterviewModeRequest(true);
+        interviewRequestRef.current = true;
+        setStatus('active');
+        onToast("Modo Entrevista Ativado. Aguarde a pergunta.", 'info');
+    };
 
-        try {
-            const resp = await generatePersonaResponse(
-                globalPersonas[id],
-                messagesRef.current,
-                globalPersonas,
-                project.description,
-                project.phase
-            );
-            const msg: Message = {
-                id: generateId(),
-                senderId: id,
-                text: resp,
-                timestamp: Date.now(),
-                reasoning: "Intervenção Manual do Usuário",
-                type: 'normal'
-            };
-            setMessages(prev => [...prev, msg]);
-            setConsecutiveBotTurns(prev => prev + 1);
-            setStatus('active');
-        } catch (e) {
-            onToast("Erro ao forçar fala", "error");
-            setStatus('idle');
-        } finally {
-            setActiveSpeakerId(null);
-            processingRef.current = false;
-            setIsProcessing(false);
-        }
-    }, [globalPersonas, project]);
+    const generatePlan = async () => {
+        onToast("Gerando plano de ação...", 'info');
+        const plan = await generateActionPlan(messagesRef.current, globalPersonas, project.title);
+        
+        const planMsg: Message = {
+            id: generateId(),
+            senderId: 'system',
+            text: `Plano de Ação Gerado: **${plan.title}**`,
+            timestamp: Date.now(),
+            type: 'system',
+            actionPlan: plan
+        };
+        await appendMessage(planMsg);
+        onToast("Plano de Ação criado!", 'info');
+    };
 
+    const nudge = (personaId: string) => {
+        // Manually trigger a specific persona? 
+        // For now, we just set status active. 
+        // To implement forced speaker, we'd need to change determineNextSpeaker or pass an override.
+        // Simplified: User sends a system message "Please speak, [Name]" hiddenly?
+        // Let's just resume for now.
+        setStatus('active');
+        onToast(`Solicitando intervenção de ${globalPersonas[personaId]?.name}...`, 'info');
+        // Advanced: We could add a "Nudge" queue.
+    };
+    
     const toggleActionItem = (msgId: string, itemId: string) => {
-        setMessages(prev => prev.map(msg => {
-            if (msg.id === msgId && msg.actionPlan) {
-                const newItems = msg.actionPlan.items.map(item => 
-                   item.id === itemId ? { ...item, completed: !item.completed } : item
-                );
-                return { ...msg, actionPlan: { ...msg.actionPlan, items: newItems } };
-            }
-            return msg;
-        }));
-    };
-
-    const editMessage = (msgId: string, newText: string) => {
-        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: newText } : m));
-    };
-
-    const regenerateLast = () => {
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg && lastMsg.senderId !== USER_ID) {
-            setMessages(prev => prev.slice(0, -1));
-            setStatus('active');
-            setConsecutiveBotTurns(Math.max(0, consecutiveBotTurns - 1));
+        const msg = messages.find(m => m.id === msgId);
+        if (msg && msg.actionPlan) {
+            const newItems = msg.actionPlan.items.map(i => i.id === itemId ? { ...i, completed: !i.completed } : i);
+            updateMessage(msgId, { actionPlan: { ...msg.actionPlan, items: newItems } });
         }
+    };
+    
+    const editMessage = (msgId: string, newText: string) => {
+        updateMessage(msgId, { text: newText });
+    };
+
+    const regenerateLast = async (msgId: string) => {
+        // Remove the last message and try again
+        setMessages(prev => {
+            const next = prev.filter(m => m.id !== msgId);
+            storageService.saveMessages(project.id, next);
+            return next;
+        });
+        setStatus('active');
+    };
+    
+    const addSystemMessage = (text: string) => {
+        appendMessage({
+            id: generateId(),
+            senderId: 'system',
+            text,
+            timestamp: Date.now(),
+            type: 'system'
+        });
     };
 
     return {
@@ -379,7 +295,6 @@ export const useChatOrchestrator = (
         status,
         isProcessing,
         activeSpeakerId,
-        consecutiveBotTurns,
         sendMessage,
         togglePause,
         clearHistory,

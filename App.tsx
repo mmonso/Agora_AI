@@ -1,49 +1,32 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PersonaConfig, Project, Toast, ThemeId, AppView, ProjectMode } from './types';
-import { INITIAL_PERSONAS, INITIAL_PROJECTS, STORAGE_KEYS, THEMES, USER_ID, COLOR_OPTIONS } from './constants';
+import { PersonaConfig, Project, Toast, ThemeId, AppView } from './types';
+import { INITIAL_PERSONAS, USER_ID, THEMES } from './constants';
+import { storageService } from './services/storageService';
+import { firebaseConfig } from './firebaseConfig';
 import { Dashboard } from './components/Dashboard';
 import { ProjectWizard } from './components/ProjectWizard';
 import { ChatSession } from './components/ChatSession';
 import { GlobalPersonaManager } from './components/GlobalPersonaManager';
 import { ExpertWorkspace } from './components/ExpertWorkspace';
 
-// Helper to load from localStorage
-const loadFromStorage = <T,>(key: string, fallback: T): T => {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
-  } catch (error) {
-    console.warn(`Error loading ${key} from storage:`, error);
-    return fallback;
-  }
-};
-
 const App: React.FC = () => {
+  // --- Loading State ---
+  const [isLoading, setIsLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState<{isError: boolean, msg: string}>({ isError: false, msg: '' });
+
   // --- Global App State ---
-  // dashboardTheme: The user's preferred theme for the dashboard (persisted)
-  const [dashboardTheme, setDashboardTheme] = useState<ThemeId>(() => loadFromStorage(STORAGE_KEYS.THEME, 'sand'));
-  // activeTheme: The currently applied theme (visual state)
-  const [activeTheme, setActiveTheme] = useState<ThemeId>(dashboardTheme);
+  const [dashboardTheme, setDashboardTheme] = useState<ThemeId>('sand');
+  const [activeTheme, setActiveTheme] = useState<ThemeId>('sand');
   
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // --- Data State ---
-  const [personas, setPersonas] = useState<Record<string, PersonaConfig>>(() => 
-    loadFromStorage(STORAGE_KEYS.PERSONAS, INITIAL_PERSONAS)
-  );
-  
-  // Use all initial personas as the default order
-  const [personaOrder, setPersonaOrder] = useState<string[]>(() => 
-    loadFromStorage(STORAGE_KEYS.PERSONA_ORDER, Object.keys(INITIAL_PERSONAS).filter(id => id !== USER_ID))
-  );
-  
-  const [projects, setProjects] = useState<Project[]>(() => 
-    loadFromStorage(STORAGE_KEYS.PROJECTS, INITIAL_PROJECTS)
-  );
+  const [personas, setPersonas] = useState<Record<string, PersonaConfig>>(INITIAL_PERSONAS);
+  const [personaOrder, setPersonaOrder] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // --- View State ---
   const [view, setView] = useState<AppView>('dashboard');
@@ -53,24 +36,69 @@ const App: React.FC = () => {
   const [isPersonaManagerOpen, setIsPersonaManagerOpen] = useState(false);
 
   const activeProject = projects.find(p => p.id === currentProjectId);
+  
+  // CHECK CONFIGURATION (Chave de exemplo vs Real)
+  const isFirebaseConfigured = firebaseConfig.apiKey !== "SUA_API_KEY_AQUI";
+
+  // --- INITIAL DATA LOADING ---
+  const loadData = async () => {
+    setIsLoading(true);
+    setConnectionError({ isError: false, msg: '' });
+    
+    try {
+      // Verificar conexão primeiro
+      const status = await storageService.checkConnection();
+      if (!status.online) {
+          let errorMsg = "Banco de dados não detectado.";
+          if (status.error?.includes('permission-denied')) {
+              errorMsg = "ERRO DE PERMISSÃO: O banco está no 'Modo Produção'. Mude para 'Modo Teste' no Console Firebase.";
+          } else if (status.error?.includes('not-found') || status.error?.includes('unavailable') || status.error?.includes('failed-precondition')) {
+              errorMsg = "Banco de dados não encontrado ou índices ausentes. Aguarde alguns instantes.";
+          } else {
+             errorMsg = `Erro de Conexão: ${status.error}. Verifique sua internet ou console.`;
+          }
+          setConnectionError({ isError: true, msg: errorMsg });
+          addToast("Modo Offline / Erro de Conexão", "error");
+      } else {
+          addToast("Conectado ao Banco de Dados!", "info");
+      }
+
+      const [loadedTheme, loadedPersonas, loadedOrder, loadedProjects] = await Promise.all([
+        storageService.getTheme(),
+        storageService.getPersonas(),
+        storageService.getPersonaOrder(),
+        storageService.getProjects()
+      ]);
+
+      setDashboardTheme(loadedTheme);
+      setActiveTheme(loadedTheme);
+      setPersonas(loadedPersonas);
+      setPersonaOrder(loadedOrder);
+      setProjects(loadedProjects);
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      addToast("Erro crítico ao carregar dados.", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) {
+        setIsLoading(false);
+        return;
+    }
+    loadData();
+  }, [isFirebaseConfigured]);
 
   // --- Effects ---
-  // Apply the active theme to the DOM
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', activeTheme);
   }, [activeTheme]);
 
-  // Sync theme: Always enforce the dashboard theme (Global Theme)
-  // unless explicitly changed by the user within a session context manually (if implemented).
-  // This disables the "Immersive Theme" behavior.
   useEffect(() => {
      setActiveTheme(dashboardTheme);
   }, [dashboardTheme]);
-
-  // Persist data
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.PERSONAS, JSON.stringify(personas)); }, [personas]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.PERSONA_ORDER, JSON.stringify(personaOrder)); }, [personaOrder]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects)); }, [projects]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -89,57 +117,60 @@ const App: React.FC = () => {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
   };
 
-  // Handle theme change from Dashboard
   const handleDashboardThemeChange = (newTheme: ThemeId) => {
     setActiveTheme(newTheme);
     setDashboardTheme(newTheme);
-    localStorage.setItem(STORAGE_KEYS.THEME, JSON.stringify(newTheme));
+    storageService.saveTheme(newTheme);
     setIsThemeMenuOpen(false);
   };
 
-  // Handle theme change from Chat Session (Manual Override)
   const handleSessionThemeChange = (newTheme: ThemeId) => {
     setActiveTheme(newTheme);
-    // Optionally update dashboard theme too if we want persistence across the app
     setDashboardTheme(newTheme);
-    localStorage.setItem(STORAGE_KEYS.THEME, JSON.stringify(newTheme));
+    storageService.saveTheme(newTheme);
   };
 
-  const handleSaveProject = (data: Omit<Project, 'id' | 'createdAt' | 'lastActiveAt'>) => {
-    if (editingProject) {
-      // Update existing
-      const updatedProject: Project = {
-        ...editingProject,
-        ...data,
-      };
-      setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
-      addToast("Projeto atualizado", "info");
-    } else {
-      // Create new
-      const newProject: Project = {
-        ...data,
-        id: Math.random().toString(36).substring(2, 9),
-        createdAt: Date.now(),
-        lastActiveAt: Date.now(),
-        mode: 'council' // Default mode for wizard
-      };
-      setProjects(prev => [newProject, ...prev]);
-      setCurrentProjectId(newProject.id);
-      setView('chat');
+  const handleSaveProject = async (data: Omit<Project, 'id' | 'createdAt' | 'lastActiveAt'>) => {
+    try {
+      if (editingProject) {
+        // Update existing
+        const updatedProject: Project = { ...editingProject, ...data };
+        setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+        await storageService.saveSingleProject(updatedProject);
+        addToast("Projeto atualizado", "info");
+      } else {
+        // Create new
+        const newProject: Project = {
+          ...data,
+          id: Math.random().toString(36).substring(2, 9),
+          createdAt: Date.now(),
+          lastActiveAt: Date.now(),
+          mode: 'council'
+        };
+        setProjects(prev => [newProject, ...prev]);
+        await storageService.saveSingleProject(newProject);
+        setCurrentProjectId(newProject.id);
+        setView('chat');
+      }
+      setIsWizardOpen(false);
+      setEditingProject(null);
+    } catch (e) {
+      console.error(e);
+      addToast("Erro ao salvar! Verifique conexão com Firebase.", "error");
     }
-    
-    setIsWizardOpen(false);
-    setEditingProject(null);
   };
   
-  // NEW: Handle Import
-  const handleImportProject = (importedProject: Project) => {
+  const handleImportProject = async (importedProject: Project) => {
+    try {
       setProjects(prev => [importedProject, ...prev]);
+      await storageService.saveSingleProject(importedProject);
       addToast("Projeto importado com sucesso!", "info");
+    } catch (e) {
+      addToast("Erro ao salvar projeto importado.", "error");
+    }
   };
 
-  // NEW: Handle 1:1 Chat Creation
-  const handleCreateOneOnOne = (personaId: string) => {
+  const handleCreateOneOnOne = async (personaId: string) => {
       const persona = personas[personaId];
       if (!persona) return;
       
@@ -150,26 +181,40 @@ const App: React.FC = () => {
           createdAt: Date.now(),
           lastActiveAt: Date.now(),
           activePersonaIds: [personaId],
-          theme: dashboardTheme, // Use global theme, not persona specific
+          theme: dashboardTheme,
           mode: 'chat',
           phase: 'exploration',
           starters: ["Olá! Como você pode me ajudar?", "Gostaria de saber sua opinião sobre...", "Me explique sua visão de mundo."]
       };
       
-      setProjects(prev => [newProject, ...prev]);
-      setCurrentProjectId(newProject.id);
-      // Stay in expert-home view, but set ID
-      setView('expert-home'); 
+      try {
+        setProjects(prev => [newProject, ...prev]);
+        await storageService.saveSingleProject(newProject);
+        setCurrentProjectId(newProject.id);
+        setView('expert-home'); 
+      } catch (e) {
+        addToast("Erro ao criar chat. Firestore indisponível?", "error");
+      }
   };
 
-  const handleUpdateProject = (updated: Project) => {
-    setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+  const handleUpdateProject = async (updated: Project) => {
+    try {
+      setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+      await storageService.saveSingleProject(updated);
+    } catch (e) {
+      console.error("Erro autosave:", e);
+    }
   };
 
-  const handleDeleteProject = (id: string) => {
-    setProjects(prev => prev.filter(p => p.id !== id));
-    if (currentProjectId === id) setCurrentProjectId(null);
-    localStorage.removeItem(`${STORAGE_KEYS.MESSAGES_PREFIX}${id}`);
+  const handleDeleteProject = async (id: string) => {
+    try {
+      setProjects(prev => prev.filter(p => p.id !== id));
+      if (currentProjectId === id) setCurrentProjectId(null);
+      await storageService.deleteProject(id);
+      await storageService.clearMessages(id);
+    } catch (e) {
+      addToast("Erro ao excluir. Tente novamente.", "error");
+    }
   };
 
   const handleSelectProject = (id: string) => {
@@ -185,7 +230,6 @@ const App: React.FC = () => {
   };
 
   const handleExitChat = () => {
-     // Usually back to dashboard
     setView('dashboard');
     setCurrentProjectId(null);
   };
@@ -200,30 +244,77 @@ const App: React.FC = () => {
     setEditingProject(null);
   };
   
-  const handleSavePersona = (persona: PersonaConfig) => {
-    setPersonas(prev => ({ ...prev, [persona.id]: persona }));
-    addToast(`Persona "${persona.name}" salva`, 'info');
+  const handleSavePersona = async (persona: PersonaConfig) => {
+    try {
+      const newPersonas = { ...personas, [persona.id]: persona };
+      setPersonas(newPersonas);
+      await storageService.savePersonas(newPersonas);
+      addToast(`Persona "${persona.name}" salva`, 'info');
+    } catch (e) {
+      addToast("Erro ao salvar persona no banco.", "error");
+    }
   };
 
-  const handleDeletePersona = (id: string) => {
-    setPersonas(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-    });
-    // Remove from projects
-    setProjects(prev => prev.map(p => ({
-        ...p,
-        activePersonaIds: p.activePersonaIds.filter(pid => pid !== id)
-    })));
-    addToast('Persona excluída', 'info');
+  const handleDeletePersona = async (id: string) => {
+    try {
+      const newPersonas = { ...personas };
+      delete newPersonas[id];
+      setPersonas(newPersonas);
+      await storageService.savePersonas(newPersonas);
+      
+      const updatedProjects = projects.map(p => ({
+          ...p,
+          activePersonaIds: p.activePersonaIds.filter(pid => pid !== id)
+      }));
+      setProjects(updatedProjects);
+      updatedProjects.forEach(p => storageService.saveSingleProject(p));
+
+      addToast('Persona excluída', 'info');
+    } catch (e) {
+      addToast("Erro ao excluir persona.", "error");
+    }
   };
 
-  // --- Render ---
+  // --- RENDER ---
+  if (!isFirebaseConfigured) {
+      return (
+          <div className="flex items-center justify-center min-h-screen bg-stone-900 text-stone-100 p-6 font-sans">
+              <div className="max-w-xl text-center">
+                  <h1 className="text-2xl font-bold mb-4">Configuração Necessária</h1>
+                  <p className="text-stone-400">Edite o arquivo <code>firebaseConfig.ts</code> com suas chaves.</p>
+              </div>
+          </div>
+      );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-main text-body flex-col gap-4">
+        <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+        <p className="animate-pulse">Conectando ao Firebase...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-main text-body relative transition-colors duration-500">
       
-      {/* Toast Container */}
+      {/* Global Connection Warning */}
+      {connectionError.isError && (
+          <div className="bg-red-600 text-white px-4 py-3 text-center text-sm font-bold z-[101] shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4 animate-in slide-in-from-top-full duration-300">
+              <div className="flex items-center gap-2">
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                 <span>{connectionError.msg}</span>
+              </div>
+              <button 
+                onClick={loadData}
+                className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-md text-xs font-bold uppercase tracking-wider transition-colors border border-white/40"
+              >
+                Tentar Conectar Novamente
+              </button>
+          </div>
+      )}
+      
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none w-full max-w-sm px-4">
         {toasts.map(toast => (
           <div key={toast.id} className={`px-4 py-3 rounded-xl shadow-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 flex items-start gap-3 ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-card text-body border border-accent/20 ring-1 ring-accent/10'}`}>
@@ -235,7 +326,6 @@ const App: React.FC = () => {
         ))}
       </div>
 
-      {/* Global Header (Only for Dashboard) */}
       {(view === 'dashboard' || (view === 'expert-home' && !activeProject)) && (
         <header className="fixed top-0 right-0 p-4 z-30 flex justify-end pointer-events-none">
           <div className="relative pointer-events-auto" ref={themeMenuRef}>
@@ -258,7 +348,6 @@ const App: React.FC = () => {
         </header>
       )}
 
-      {/* Main Content Area */}
       <div className="flex-1 overflow-hidden h-full">
         {view === 'dashboard' && (
           <Dashboard 
@@ -284,7 +373,6 @@ const App: React.FC = () => {
                 onDeleteProject={handleDeleteProject}
                 onBack={() => setView('dashboard')}
                 onNewChat={() => setCurrentProjectId(null)}
-                // Chat Props
                 onUpdateProject={handleUpdateProject}
                 onToast={addToast}
                 globalPersonaOrder={personaOrder}
@@ -295,7 +383,6 @@ const App: React.FC = () => {
             />
         )}
 
-        {/* 'chat' view is now strictly for Council mode */}
         {view === 'chat' && activeProject && (
           <ChatSession 
             project={activeProject}
@@ -313,7 +400,6 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {/* Project Wizard Modal */}
       {isWizardOpen && (
         <ProjectWizard 
           personas={personas}
@@ -323,7 +409,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Global Persona Manager Modal */}
       {isPersonaManagerOpen && (
         <GlobalPersonaManager 
            personas={personas}

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './ChatMessage';
 import { Controls } from './Controls';
@@ -107,7 +106,7 @@ export const ChatSession: React.FC<ChatSessionProps> = ({
 
   // --- Handlers (UI/Bridge) ---
   const handleSendMessageBridge = (text: string, attachments: Attachment[] = []) => {
-      sendMessage(text, attachments, replyingTo || undefined);
+      sendMessage(text, attachments, replyingTo?.message);
       setReplyingTo(null);
       isNearBottomRef.current = true;
   };
@@ -358,7 +357,11 @@ export const ChatSession: React.FC<ChatSessionProps> = ({
                 <div className="w-20 h-20 bg-hover rounded-full flex items-center justify-center mb-6 text-muted">
                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                 </div>
-                <p className="text-muted max-w-md">{isOneOnOne ? "Inicie a conversa." : "O conselho está reunido. Inicie a sessão."}</p>
+                <p className="text-muted max-w-md">
+                   {isOneOnOne 
+                     ? "Inicie a conversa direta com o especialista." 
+                     : "O Conselho está reunido. Ao enviar sua primeira mensagem, os especialistas iniciarão o debate autônomo entre si."}
+                </p>
                  <div className="flex flex-col items-center gap-4 max-w-2xl mt-6">
                     <div className="flex flex-wrap justify-center gap-2">
                         {activeStarters.map((starter, idx) => (

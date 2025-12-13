@@ -103,8 +103,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, persona, isUs
             p-3 md:p-5 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed transition-colors duration-200 break-words w-full relative
             ${isUser 
                 ? 'bg-body text-main rounded-tr-none' 
-                : 'bg-card border border-border text-body rounded-tl-none'}
-            ${!isUser ? `bg-opacity-80 ${displayPersona.avatarColor.replace('bg-', 'bg-').replace('600', '50').replace('700', '50').replace('500', '50').replace('800', '50')}/10` : ''}
+                : `bg-card border border-border text-body rounded-tl-none border-l-4 ${displayPersona.borderColor}`}
           `}>
             {/* Attachments */}
             {message.attachments && message.attachments.length > 0 && (
