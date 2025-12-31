@@ -3,14 +3,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PersonaConfig, Project, Toast, ThemeId, AppView } from './types';
 import { INITIAL_PERSONAS, THEMES } from './constants';
 import { storageService } from './services/storageService';
-import { firebaseConfig } from './firebaseConfig';
 import { Dashboard } from './components/Dashboard';
 import { ProjectWizard } from './components/ProjectWizard';
 import { ChatSession } from './components/ChatSession';
 import { GlobalPersonaManager } from './components/GlobalPersonaManager';
 import { ExpertWorkspace } from './components/ExpertWorkspace';
 import { LoginScreen } from './components/LoginScreen';
-import { User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
   // --- Auth State ---
@@ -19,12 +18,12 @@ const App: React.FC = () => {
 
   // --- Loading State ---
   const [isLoading, setIsLoading] = useState(false); // Data loading
-  const [connectionError, setConnectionError] = useState<{isError: boolean, msg: string}>({ isError: false, msg: '' });
+  const [connectionError, setConnectionError] = useState<{ isError: boolean, msg: string }>({ isError: false, msg: '' });
 
   // --- Global App State ---
   const [dashboardTheme, setDashboardTheme] = useState<ThemeId>('sand');
   const [activeTheme, setActiveTheme] = useState<ThemeId>('sand');
-  
+
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -42,27 +41,13 @@ const App: React.FC = () => {
   const [isPersonaManagerOpen, setIsPersonaManagerOpen] = useState(false);
 
   const activeProject = projects.find(p => p.id === currentProjectId);
-  
-  // CHECK CONFIGURATION
-  const isFirebaseConfigured = firebaseConfig.apiKey !== "SUA_API_KEY_AQUI";
 
   // --- INITIAL DATA LOADING (After Auth) ---
   const loadData = async () => {
     setIsLoading(true);
     setConnectionError({ isError: false, msg: '' });
-    
-    try {
-      // Verificar conexão
-      if (isFirebaseConfigured) {
-          const status = await storageService.checkConnection();
-          if (!status.online) {
-             console.warn("Offline/Error:", status.error);
-             if (status.error?.includes('permission')) {
-                 setConnectionError({ isError: true, msg: status.error });
-             }
-          }
-      }
 
+    try {
       // Carrega dados (storageService usa User UID)
       const [loadedTheme, loadedPersonas, loadedOrder, loadedProjects] = await Promise.all([
         storageService.getTheme(),
@@ -89,15 +74,15 @@ const App: React.FC = () => {
     const unsubscribe = storageService.initAuth((user) => {
       setCurrentUser(user);
       setAuthInitialized(true);
-      
+
       if (user) {
         // Se usuário detectado (sessão persistente), carrega dados
         loadData();
       } else {
         // Load only the theme if no user (for login screen aesthetics)
         storageService.getTheme().then(theme => {
-            setDashboardTheme(theme);
-            setActiveTheme(theme);
+          setDashboardTheme(theme);
+          setActiveTheme(theme);
         });
       }
     });
@@ -118,7 +103,7 @@ const App: React.FC = () => {
   }, [activeTheme]);
 
   useEffect(() => {
-     setActiveTheme(dashboardTheme);
+    setActiveTheme(dashboardTheme);
   }, [dashboardTheme]);
 
   useEffect(() => {
@@ -180,7 +165,7 @@ const App: React.FC = () => {
       addToast("Erro ao salvar! (Tentando localmente)", "error");
     }
   };
-  
+
   const handleImportProject = async (importedProject: Project) => {
     try {
       setProjects(prev => [importedProject, ...prev]);
@@ -192,30 +177,30 @@ const App: React.FC = () => {
   };
 
   const handleCreateOneOnOne = async (personaId: string) => {
-      const persona = personas[personaId];
-      if (!persona) return;
-      
-      const newProject: Project = {
-          id: Math.random().toString(36).substring(2, 9),
-          title: `Chat com ${persona.name}`,
-          description: `Conversa direta com ${persona.name} (${persona.role})`,
-          createdAt: Date.now(),
-          lastActiveAt: Date.now(),
-          activePersonaIds: [personaId],
-          theme: dashboardTheme,
-          mode: 'chat',
-          phase: 'exploration',
-          starters: ["Olá! Como você pode me ajudar?", "Gostaria de saber sua opinião sobre...", "Me explique sua visão de mundo."]
-      };
-      
-      try {
-        setProjects(prev => [newProject, ...prev]);
-        await storageService.saveSingleProject(newProject);
-        setCurrentProjectId(newProject.id);
-        setView('expert-home'); 
-      } catch (e) {
-        addToast("Erro ao criar chat.", "error");
-      }
+    const persona = personas[personaId];
+    if (!persona) return;
+
+    const newProject: Project = {
+      id: Math.random().toString(36).substring(2, 9),
+      title: `Chat com ${persona.name}`,
+      description: `Conversa direta com ${persona.name} (${persona.role})`,
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+      activePersonaIds: [personaId],
+      theme: dashboardTheme,
+      mode: 'chat',
+      phase: 'exploration',
+      starters: ["Olá! Como você pode me ajudar?", "Gostaria de saber sua opinião sobre...", "Me explique sua visão de mundo."]
+    };
+
+    try {
+      setProjects(prev => [newProject, ...prev]);
+      await storageService.saveSingleProject(newProject);
+      setCurrentProjectId(newProject.id);
+      setView('expert-home');
+    } catch (e) {
+      addToast("Erro ao criar chat.", "error");
+    }
   };
 
   const handleUpdateProject = async (updated: Project) => {
@@ -241,12 +226,12 @@ const App: React.FC = () => {
   const handleSelectProject = (id: string) => {
     const project = projects.find(p => p.id === id);
     if (project) {
-        setCurrentProjectId(id);
-        if (project.mode === 'chat') {
-            setView('expert-home');
-        } else {
-            setView('chat');
-        }
+      setCurrentProjectId(id);
+      if (project.mode === 'chat') {
+        setView('expert-home');
+      } else {
+        setView('chat');
+      }
     }
   };
 
@@ -264,7 +249,7 @@ const App: React.FC = () => {
     setIsWizardOpen(false);
     setEditingProject(null);
   };
-  
+
   const handleSavePersona = async (persona: PersonaConfig) => {
     try {
       const newPersonas = { ...personas, [persona.id]: persona };
@@ -282,10 +267,10 @@ const App: React.FC = () => {
       delete newPersonas[id];
       setPersonas(newPersonas);
       await storageService.savePersonas(newPersonas);
-      
+
       const updatedProjects = projects.map(p => ({
-          ...p,
-          activePersonaIds: p.activePersonaIds.filter(pid => pid !== id)
+        ...p,
+        activePersonaIds: p.activePersonaIds.filter(pid => pid !== id)
       }));
       setProjects(updatedProjects);
       updatedProjects.forEach(p => storageService.saveSingleProject(p));
@@ -309,10 +294,10 @@ const App: React.FC = () => {
 
   // 2. Login Screen (Strict)
   if (!currentUser) {
-    return <LoginScreen 
-            currentTheme={activeTheme}
-            onSetTheme={handleDashboardThemeChange}
-           />;
+    return <LoginScreen
+      currentTheme={activeTheme}
+      onSetTheme={handleDashboardThemeChange}
+    />;
   }
 
   // 3. Data Loading Screen
@@ -327,22 +312,22 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full bg-main text-body relative transition-colors duration-500">
-      
+
       {/* Global Connection Warning */}
       {connectionError.isError && (
-          <div className="bg-amber-600 text-white px-4 py-2 text-center text-xs font-bold z-[101] shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4 animate-in slide-in-from-top-full duration-300">
-              <div className="flex items-center gap-2">
-                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                 <span>{connectionError.msg}</span>
-              </div>
+        <div className="bg-amber-600 text-white px-4 py-2 text-center text-xs font-bold z-[101] shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4 animate-in slide-in-from-top-full duration-300">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <span>{connectionError.msg}</span>
           </div>
+        </div>
       )}
-      
+
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none w-full max-w-sm px-4">
         {toasts.map(toast => (
           <div key={toast.id} className={`px-4 py-3 rounded-xl shadow-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 flex items-start gap-3 ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-card text-body border border-accent/20 ring-1 ring-accent/10'}`}>
             <span className="shrink-0 mt-0.5 text-lg">
-                {toast.type === 'error' ? '🚫' : '💡'}
+              {toast.type === 'error' ? '🚫' : '💡'}
             </span>
             <span>{toast.message}</span>
           </div>
@@ -351,19 +336,19 @@ const App: React.FC = () => {
 
       {(view === 'dashboard' || (view === 'expert-home' && !activeProject)) && (
         <header className="fixed top-0 right-0 p-4 z-30 flex justify-end pointer-events-none gap-2">
-          
+
           {/* User Profile / Logout */}
           <div className="pointer-events-auto flex items-center gap-2 bg-card border border-border rounded-lg shadow-sm p-1">
-             <div className="w-8 h-8 rounded-full bg-accent text-accent-fg flex items-center justify-center font-bold text-xs overflow-hidden">
-                {currentUser?.photoURL ? (
-                    <img src={currentUser.photoURL} alt="User" className="w-full h-full object-cover" />
-                ) : (
-                    currentUser?.email?.charAt(0).toUpperCase() || (currentUser?.displayName?.charAt(0).toUpperCase() || 'U')
-                )}
-             </div>
-             <button onClick={handleLogout} className="p-1.5 text-muted hover:text-red-500 rounded-md transition-colors" title="Sair">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-             </button>
+            <div className="w-8 h-8 rounded-full bg-accent text-accent-fg flex items-center justify-center font-bold text-xs overflow-hidden">
+              {currentUser?.user_metadata?.avatar_url ? (
+                <img src={currentUser.user_metadata.avatar_url} alt="User" className="w-full h-full object-cover" />
+              ) : (
+                currentUser?.email?.charAt(0).toUpperCase() || (currentUser?.user_metadata?.display_name?.charAt(0).toUpperCase() || 'U')
+              )}
+            </div>
+            <button onClick={handleLogout} className="p-1.5 text-muted hover:text-red-500 rounded-md transition-colors" title="Sair">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            </button>
           </div>
 
           <div className="relative pointer-events-auto" ref={themeMenuRef}>
@@ -372,14 +357,14 @@ const App: React.FC = () => {
             </button>
             {isThemeMenuOpen && (
               <div className="absolute top-full right-0 mt-2 w-48 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150">
-                 <div className="p-2 space-y-1">
-                    {THEMES.map(t => (
-                      <button key={t.id} onClick={() => handleDashboardThemeChange(t.id)} className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors ${activeTheme === t.id ? 'bg-hover font-bold text-body' : 'text-muted hover:bg-hover hover:text-body'}`}>
-                         <div className="w-4 h-4 rounded-full border border-gray-300" style={{ backgroundColor: t.color }}></div>
-                         {t.label}
-                      </button>
-                    ))}
-                 </div>
+                <div className="p-2 space-y-1">
+                  {THEMES.map(t => (
+                    <button key={t.id} onClick={() => handleDashboardThemeChange(t.id)} className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors ${activeTheme === t.id ? 'bg-hover font-bold text-body' : 'text-muted hover:bg-hover hover:text-body'}`}>
+                      <div className="w-4 h-4 rounded-full border border-gray-300" style={{ backgroundColor: t.color }}></div>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -388,8 +373,8 @@ const App: React.FC = () => {
 
       <div className="flex-1 overflow-hidden h-full">
         {view === 'dashboard' && (
-          <Dashboard 
-            projects={projects} 
+          <Dashboard
+            projects={projects}
             personas={personas}
             onCreateNew={() => { setEditingProject(null); setIsWizardOpen(true); }}
             onOpenPersonaManager={() => setIsPersonaManagerOpen(true)}
@@ -400,29 +385,29 @@ const App: React.FC = () => {
             onOpenExpertWorkspace={() => setView('expert-home')}
           />
         )}
-        
+
         {view === 'expert-home' && (
-            <ExpertWorkspace 
-                activeProject={activeProject || null}
-                projects={projects}
-                personas={personas}
-                onSelectProject={handleSelectProject}
-                onCreateChat={handleCreateOneOnOne}
-                onDeleteProject={handleDeleteProject}
-                onBack={() => setView('dashboard')}
-                onNewChat={() => setCurrentProjectId(null)}
-                onUpdateProject={handleUpdateProject}
-                onToast={addToast}
-                globalPersonaOrder={personaOrder}
-                currentTheme={activeTheme}
-                onSetTheme={handleSessionThemeChange}
-                onSavePersona={handleSavePersona}
-                onDeletePersona={handleDeletePersona}
-            />
+          <ExpertWorkspace
+            activeProject={activeProject || null}
+            projects={projects}
+            personas={personas}
+            onSelectProject={handleSelectProject}
+            onCreateChat={handleCreateOneOnOne}
+            onDeleteProject={handleDeleteProject}
+            onBack={() => setView('dashboard')}
+            onNewChat={() => setCurrentProjectId(null)}
+            onUpdateProject={handleUpdateProject}
+            onToast={addToast}
+            globalPersonaOrder={personaOrder}
+            currentTheme={activeTheme}
+            onSetTheme={handleSessionThemeChange}
+            onSavePersona={handleSavePersona}
+            onDeletePersona={handleDeletePersona}
+          />
         )}
 
         {view === 'chat' && activeProject && (
-          <ChatSession 
+          <ChatSession
             project={activeProject}
             globalPersonas={personas}
             onUpdateProject={handleUpdateProject}
@@ -439,20 +424,20 @@ const App: React.FC = () => {
       </div>
 
       {isWizardOpen && (
-        <ProjectWizard 
+        <ProjectWizard
           personas={personas}
-          initialData={editingProject} 
+          initialData={editingProject}
           onSave={handleSaveProject}
           onCancel={handleCancelWizard}
         />
       )}
 
       {isPersonaManagerOpen && (
-        <GlobalPersonaManager 
-           personas={personas}
-           onSave={handleSavePersona}
-           onDelete={handleDeletePersona}
-           onClose={() => setIsPersonaManagerOpen(false)}
+        <GlobalPersonaManager
+          personas={personas}
+          onSave={handleSavePersona}
+          onDelete={handleDeletePersona}
+          onClose={() => setIsPersonaManagerOpen(false)}
         />
       )}
     </div>
