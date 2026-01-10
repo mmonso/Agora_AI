@@ -12,10 +12,11 @@ interface DashboardProps {
   onDeleteProject: (id: string) => void;
   onImportProject?: (project: Project) => void;
   onOpenExpertWorkspace: () => void;
+  onSeedDefaults: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  projects, personas, onCreateNew, onOpenPersonaManager, onSelectProject, onEditProject, onDeleteProject, onImportProject, onOpenExpertWorkspace
+  projects, personas, onCreateNew, onOpenPersonaManager, onSelectProject, onEditProject, onDeleteProject, onImportProject, onOpenExpertWorkspace, onSeedDefaults
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -179,11 +180,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Empty State */}
         {councilProjects.length === 0 && (
-           <div className="col-span-full py-12 flex flex-col items-center justify-center text-center opacity-50 border-2 border-dashed border-border rounded-2xl">
+           <div className="col-span-full py-12 flex flex-col items-center justify-center text-center opacity-70 border-2 border-dashed border-border rounded-2xl bg-hover/10">
               <div className="w-16 h-16 bg-hover rounded-full flex items-center justify-center mb-4">
                  <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
               </div>
-              <p className="text-muted">Nenhum conselho criado ainda.</p>
+              <p className="text-body font-bold mb-2">Nenhum conselho criado ainda.</p>
+              <p className="text-muted text-sm mb-6 max-w-xs">Você pode começar um do zero ou usar nossos modelos sugeridos.</p>
+              
+              <button 
+                onClick={onSeedDefaults}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-accent text-accent-fg hover:opacity-90 rounded-xl font-bold transition-all shadow-lg active:scale-95"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Restaurar Conselhos de Fábrica
+              </button>
            </div>
         )}
       </div>

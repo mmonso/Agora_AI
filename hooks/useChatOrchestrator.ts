@@ -23,12 +23,11 @@ export const useChatOrchestrator = (
     const [isProcessing, setIsProcessing] = useState(false);
     const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
     const [consecutiveBotTurns, setConsecutiveBotTurns] = useState(0);
-    const [interviewModeRequest, setInterviewModeRequest] = useState(false);
     const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
     
     // --- Refs (Latest Values) ---
     const messagesRef = useRef(messages);
-    const processingRef = useRef(false); // Mutex lock
+    const processingRef = useRef(false);
     const interviewRequestRef = useRef(false);
 
     // Keep ref synced
@@ -36,7 +35,7 @@ export const useChatOrchestrator = (
         messagesRef.current = messages;
     }, [messages]);
 
-    // --- Load History on Mount (Async) ---
+    // --- Load History on Mount ---
     useEffect(() => {
         const loadHistory = async () => {
             setIsHistoryLoaded(false);
@@ -51,16 +50,12 @@ export const useChatOrchestrator = (
     const appendMessage = useCallback(async (msg: Message) => {
         setMessages(prev => {
             const next = [...prev, msg];
-            // Fire and forget save (or await if critical)
             storageService.saveMessages(project.id, next);
             return next;
         });
 
-        // Update Project 'lastActiveAt'
         const updatedProject = { ...project, lastActiveAt: Date.now() };
         onUpdateProject(updatedProject);
-        // We don't need to explicitly saveProject here as onUpdateProject usually handles state,
-        // but storageService needs to persist it.
         storageService.saveSingleProject(updatedProject);
     }, [project, onUpdateProject]);
 
@@ -75,11 +70,15 @@ export const useChatOrchestrator = (
 
     // --- Orchestration Logic ---
     const processTurn = useCallback(async () => {
+        // Mutex check
         if (processingRef.current || status === 'paused') return;
         
-        // Safety check: Don't let bots talk forever (limit 5 turns before pausing)
-        if (consecutiveBotTurns >= 5 && !interviewRequestRef.current) {
+        const isOneOnOne = project.mode === 'chat';
+
+        // Safety check for multi-agent loops (Only for Council mode)
+        if (!isOneOnOne && consecutiveBotTurns >= 6 && !interviewRequestRef.current) {
             setStatus('paused');
+            onToast("Pausa para reflexão. Envie uma mensagem para continuar.", "info");
             return;
         }
 
@@ -92,39 +91,64 @@ export const useChatOrchestrator = (
             const context = project.description;
             const phase = project.phase || 'exploration';
             
-            // 1. Determine Next Speaker
-            const routerResult = await determineNextSpeaker(
-                currentHistory, 
-                project.activePersonaIds, 
-                globalPersonas,
-                context,
-                phase,
-                interviewRequestRef.current
-            );
+            let speakerId: string | null = null;
+            let reasoning = '';
 
-            // Handle Phase Change from Router
-            if (routerResult.shouldAdvancePhase) {
-                let nextPhase: ProjectPhase = phase;
-                if (phase === 'exploration') nextPhase = 'synthesis';
-                else if (phase === 'synthesis') nextPhase = 'action';
-                
-                if (nextPhase !== phase) {
-                    onUpdateProject({ ...project, phase: nextPhase });
-                    await appendMessage({
-                        id: generateId(),
-                        senderId: 'system',
-                        text: `Fase alterada automaticamente para: ${nextPhase.toUpperCase()}`,
-                        timestamp: Date.now(),
-                        type: 'system'
-                    });
-                    onToast(`Fase avançada para ${nextPhase}`, 'info');
+            // --- 1. Determine Speaker ---
+            if (isOneOnOne) {
+                // Direct Chat Logic: Always pick the first (and likely only) active persona
+                speakerId = project.activePersonaIds[0];
+                if (!speakerId) {
+                    console.error("No persona found for 1:1 chat");
+                    setStatus('idle'); 
+                    processingRef.current = false;
+                    setIsProcessing(false);
+                    return;
+                }
+            } else {
+                // Council Logic: Use Router to decide
+                const routerResult = await determineNextSpeaker(
+                    currentHistory, 
+                    project.activePersonaIds, 
+                    globalPersonas,
+                    context,
+                    phase,
+                    interviewRequestRef.current
+                );
+
+                speakerId = routerResult.nextSpeakerId;
+                reasoning = routerResult.reasoning;
+
+                // Handle Phase Change from Router (Only in Council)
+                if (routerResult.shouldAdvancePhase) {
+                    let nextPhase: ProjectPhase = phase;
+                    if (phase === 'exploration') nextPhase = 'synthesis';
+                    else if (phase === 'synthesis') nextPhase = 'action';
+                    
+                    if (nextPhase !== phase) {
+                        onUpdateProject({ ...project, phase: nextPhase });
+                        await appendMessage({
+                            id: generateId(),
+                            senderId: 'system',
+                            text: `Fase alterada automaticamente para: ${nextPhase.toUpperCase()}`,
+                            timestamp: Date.now(),
+                            type: 'system'
+                        });
+                    }
                 }
             }
 
-            const speakerId = routerResult.nextSpeakerId;
-
             if (!speakerId) {
-                setStatus('idle'); // No one wants to speak
+                setStatus('idle');
+                processingRef.current = false;
+                setIsProcessing(false);
+                return;
+            }
+
+            // SAFETY CHECK: Verify if the chosen speaker is actually in the project's active list
+            if (!project.activePersonaIds.includes(speakerId)) {
+                console.warn(`Router selected invalid speaker: ${speakerId}. Stopping turn.`);
+                setStatus('idle');
                 processingRef.current = false;
                 setIsProcessing(false);
                 return;
@@ -132,46 +156,47 @@ export const useChatOrchestrator = (
 
             setActiveSpeakerId(speakerId);
             
-            // 2. Generate Content
+            // --- 2. Generate Content ---
             const speaker = globalPersonas[speakerId];
             const responseText = await generatePersonaResponse(
                 speaker,
                 currentHistory,
                 globalPersonas,
+                project.activePersonaIds, 
                 context,
                 phase,
                 interviewRequestRef.current ? 'interview' : 'default'
             );
             
-            // Reset interview flag if it was active
+            // Reset interview flag
             if (interviewRequestRef.current) {
-                setInterviewModeRequest(false);
                 interviewRequestRef.current = false;
             }
 
-            // 3. Add Message
+            // --- 3. Add Message ---
             const newMessage: Message = {
                 id: generateId(),
                 senderId: speakerId,
                 text: responseText,
                 timestamp: Date.now(),
-                reasoning: routerResult.reasoning
+                reasoning: reasoning
             };
 
             await appendMessage(newMessage);
-            setConsecutiveBotTurns(prev => prev + 1);
-
-            // 4. Schedule Next Turn
+            
+            // --- 4. Cleanup & Next State ---
             setTimeout(() => {
                 processingRef.current = false;
                 setIsProcessing(false);
                 setActiveSpeakerId(null);
                 
-                // If not paused, continue
-                if (status === 'active') {
-                    processTurn();
-                } else {
+                if (isOneOnOne) {
+                    // In 1:1 chat, we ALWAYS stop after one response
                     setStatus('idle');
+                    setConsecutiveBotTurns(0);
+                } else {
+                    // In Council, we increment turns and let the useEffect trigger the loop
+                    setConsecutiveBotTurns(prev => prev + 1);
                 }
             }, TURN_DELAY_MS);
 
@@ -184,10 +209,12 @@ export const useChatOrchestrator = (
         }
     }, [status, project, globalPersonas, consecutiveBotTurns, onToast, appendMessage, onUpdateProject]);
 
-    // --- Trigger Loop ---
+    // --- Trigger Loop (The heartbeat of autonomous conversation) ---
     useEffect(() => {
+        // Only trigger loop if status is ACTIVE.
+        // In 1:1 chat, processTurn sets status to IDLE at the end, preventing the loop.
         if (status === 'active' && !isProcessing && isHistoryLoaded) {
-            const timeout = setTimeout(processTurn, 1000);
+            const timeout = setTimeout(processTurn, 500);
             return () => clearTimeout(timeout);
         }
     }, [status, isProcessing, processTurn, isHistoryLoaded]);
@@ -210,8 +237,8 @@ export const useChatOrchestrator = (
         }
 
         await appendMessage(userMsg);
-        setStatus('active');
-        setConsecutiveBotTurns(0); // Reset bot counter on user intervention
+        setStatus('active'); // Start the turn
+        setConsecutiveBotTurns(0); 
     };
 
     const togglePause = () => {
@@ -222,12 +249,13 @@ export const useChatOrchestrator = (
         setMessages([]);
         storageService.clearMessages(project.id);
         setStatus('idle');
+        setConsecutiveBotTurns(0);
     };
 
     const startInterview = () => {
-        setInterviewModeRequest(true);
         interviewRequestRef.current = true;
         setStatus('active');
+        setConsecutiveBotTurns(0);
         onToast("Modo Entrevista Ativado. Aguarde a pergunta.", 'info');
     };
 
@@ -244,18 +272,12 @@ export const useChatOrchestrator = (
             actionPlan: plan
         };
         await appendMessage(planMsg);
-        onToast("Plano de Ação criado!", 'info');
     };
 
     const nudge = (personaId: string) => {
-        // Manually trigger a specific persona? 
-        // For now, we just set status active. 
-        // To implement forced speaker, we'd need to change determineNextSpeaker or pass an override.
-        // Simplified: User sends a system message "Please speak, [Name]" hiddenly?
-        // Let's just resume for now.
+        // Nudge logic can trigger a turn even in 1:1 if needed, but primarily for council
         setStatus('active');
-        onToast(`Solicitando intervenção de ${globalPersonas[personaId]?.name}...`, 'info');
-        // Advanced: We could add a "Nudge" queue.
+        setConsecutiveBotTurns(0);
     };
     
     const toggleActionItem = (msgId: string, itemId: string) => {
@@ -271,13 +293,13 @@ export const useChatOrchestrator = (
     };
 
     const regenerateLast = async (msgId: string) => {
-        // Remove the last message and try again
         setMessages(prev => {
             const next = prev.filter(m => m.id !== msgId);
             storageService.saveMessages(project.id, next);
             return next;
         });
         setStatus('active');
+        setConsecutiveBotTurns(prev => Math.max(0, prev - 1));
     };
     
     const addSystemMessage = (text: string) => {

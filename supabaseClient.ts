@@ -1,11 +1,12 @@
-/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+/**
+ * CONFIGURAÇÃO DO SUPABASE
+ * ------------------------
+ * Estas credenciais permitem que o frontend se comunique com o seu banco de dados.
+ * A chave 'anon' é segura para uso no lado do cliente com RLS (Row Level Security) ativado.
+ */
+const supabaseUrl = 'https://dnurdaatsqnmzpinfwec.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRudXJkYWF0c3FubXpwaW5md2VjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NTI2MjMsImV4cCI6MjA4MzUyODYyM30.kCNNfhKSstCgLAOM8s9vY82Zkwu_QMxkoBRGjCGtksA';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn("Supabase credentials missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local");
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseKey);

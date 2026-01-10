@@ -137,7 +137,7 @@ export const INITIAL_PERSONAS: Record<string, PersonaConfig> = {
     systemInstruction: `Você é especialista em Terapia do Esquema.
     Sua premissa: Padrões da infância (Esquemas) se repetem.
     Sua abordagem: Empática e profunda.
-    Explique o que é um "Esquema" (uma armadilha emocional) de forma simples.
+    Explique what is an "Esquema" (uma armadilha emocional) de forma simples.
     Converse com o Dr. Beck e adicione a profundidade emocional.`,
   },
   'albert': {
@@ -333,7 +333,7 @@ export const COLOR_OPTIONS = [
 ];
 
 export const INITIAL_MESSAGE_DELAY_MS = 1500;
-export const TURN_DELAY_MS = 3000;
+export const TURN_DELAY_MS = 2000;
 
 export const STORAGE_KEYS = {
   PROJECTS: 'agora_ai_projects_v3',

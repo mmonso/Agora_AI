@@ -32,12 +32,12 @@ export const generatePersonaResponse = async (
   targetPersona: PersonaConfig,
   history: Message[],
   personas: Record<string, PersonaConfig>,
+  activePersonaIds: string[],
   projectContext?: string,
   phase: ProjectPhase = 'exploration',
   mode: 'default' | 'interview' = 'default'
 ): Promise<string> => {
   try {
-    // REVERTED: Sending Full History as requested (No Sliding Window)
     const recentHistory = history;
 
     // Check if the very last message has attachments
@@ -45,17 +45,21 @@ export const generatePersonaResponse = async (
     const hasAttachments = lastMessage?.attachments && lastMessage.attachments.length > 0;
     
     // Identify who spoke last to encourage interaction
-    const lastSpeakerName = personas[lastMessage.senderId]?.name || 'User';
     const isUserLast = lastMessage.senderId === 'user';
-    const isSystemLast = lastMessage.type === 'system';
     
+    // Create a list of who is actually in the room to prevent hallucinations
+    const presentColleagues = activePersonaIds
+      .filter(id => id !== targetPersona.id)
+      .map(id => `- ${personas[id]?.name} (${personas[id]?.role})`)
+      .join('\n');
+
     // Full History formatting
     const formattedHistory = recentHistory.map(msg => {
       if (msg.type === 'system') {
-          return `[SYSTEM EVENT]: ${msg.text}`;
+          return `[EVENTO DO SISTEMA]: ${msg.text}`;
       }
-      const name = personas[msg.senderId]?.name || 'User';
-      const attInfo = msg.attachments?.length ? `[Attached: ${msg.attachments.map(a => a.name).join(', ')}]` : '';
+      const name = personas[msg.senderId]?.name || 'Usuário';
+      const attInfo = msg.attachments?.length ? `[Anexo: ${msg.attachments.map(a => a.name).join(', ')}]` : '';
       return `${name}: ${msg.text} ${attInfo}`;
     }).join('\n\n');
 
@@ -64,56 +68,53 @@ export const generatePersonaResponse = async (
     let specialInstruction = "";
     if (mode === 'interview') {
         specialInstruction = `
-        *** INTERVIEW MODE ACTIVE ***
-        YOUR GOAL: You are NOT here to give advice right now. You need to understand the User deeper.
-        TASK: Ask ONE single, provocative, deep question based on your persona's expertise to get more context from the User.
-        CONSTRAINT: Do not lecture. Do not answer previous questions. JUST ASK.
+        *** MODO ENTREVISTA ATIVO ***
+        SEU OBJETIVO: Você NÃO está aqui para dar conselhos agora. Você precisa entender o Usuário mais profundamente.
+        TAREFA: Faça UMA única pergunta provocativa e profunda baseada na sua especialidade para obter mais contexto do Usuário.
+        RESTRIÇÃO: Não dê palestras. Não responda perguntas anteriores. APENAS PERGUNTE.
         `;
     }
 
     let promptText = `
-      You are participating in a roundtable discussion (The Agora Council).
+      Você está participando de uma mesa redonda (O Conselho de Ágora).
       
-      YOUR PERSONA:
-      Name: ${targetPersona.name}
-      Role: ${targetPersona.role}
-      Identity: ${targetPersona.systemInstruction}
+      SUA PERSONA:
+      Nome: ${targetPersona.name}
+      Papel: ${targetPersona.role}
+      Identidade/Base Teórica: ${targetPersona.systemInstruction}
 
-      CONTEXT OF DISCUSSION:
-      "${projectContext || 'General Discussion'}"
+      QUEM ESTÁ NA SALA COM VOCÊ (Colegas Presentes):
+      ${presentColleagues}
+      *O Usuário (Paciente/Analisando) também está presente.*
+
+      CONTEXTO DA DISCUSSÃO:
+      "${projectContext || 'Discussão Geral'}"
 
       ${phaseInstruction}
       ${specialInstruction}
 
-      CONVERSATION HISTORY:
+      HISTÓRICO DA CONVERSA:
       ${formattedHistory}
       
-      *** CRITICAL INSTRUCTIONS FOR THIS TURN ***
+      *** INSTRUÇÕES CRÍTICAS PARA ESTE TURNO ***
       
-      1. **CURRENT PHASE AWARENESS:**
-         - You MUST adhere to the goal of the current phase (${phase}).
-         - EXPLORATION: Be expansive, theoretical, curious.
-         - SYNTHESIS: Connect ideas, summarize, find consensus.
-         - ACTION: Be practical, prescriptive, give homework/tasks.
+      1. **DINÂMICA DE DEBATE:** 
+         - Você está conversando com o USUÁRIO e com seus COLEGAS PRESENTES.
+         - IMPORTANTE: Se você mencionar um colega, certifique-se de que ele está na lista "QUEM ESTÁ NA SALA". Não chame especialistas que não estão presentes (como Freud ou Jung se eles não estiverem na lista acima).
+         - Se um colega presente falou antes, reaja ao que ele disse.
 
-      2. **SYSTEM EVENTS:**
-         - If the last message was a [SYSTEM EVENT] (e.g., "User changed phase"), ACKNOWLEDGE it implicitly by shifting your tone to match the new phase immediately.
-         - Do not say "I see we changed phases". Just ACT according to the new phase.
+      2. **CONSCIÊNCIA DA FASE:**
+         - Respeite rigorosamente a fase atual (${phase}).
 
-      3. **HANDLING USER INPUT:**
-         - The User spoke last: "${isUserLast ? 'YES' : 'NO'}".
-         - If the User spoke last, ADDRESS THEIR POINT DIRECTLY.
+      3. **TRATAMENTO DO INPUT DO USUÁRIO:**
+         - O Usuário foi o último a falar? "${isUserLast ? 'SIM' : 'NÃO'}".
+         - Se o Usuário falou por último, ENDERECE o ponto dele diretamente.
       
-      4. **INTERACTION:** 
-         - ${!isUserLast && !isSystemLast ? `You are replying to your colleague, ${lastSpeakerName}.` : `You are speaking to the group/user.`}
-         - If replying to a colleague, use their name.
+      4. **ACESSIBILIDADE:**
+         - EXPLIQUE COMO SE EU TIVESSE 5 ANOS (ELI5).
       
-      5. **ACCESSIBILITY:**
-         - EXPLAIN LIKE I'M 5. No complex jargon without immediate simple definition.
-      
-      6. **BREVITY:**
-         - Keep it conversational. Max 3 short paragraphs.
-         ${mode === 'interview' ? '- Keep it very short. Just the question and a brief lead-in.' : ''}
+      5. **BREVIDADE:**
+         - Mantenha o tom de conversa. Máximo 3 parágrafos curtos.
     `;
 
     let contentParts: any[] = [{ text: promptText }];
@@ -134,7 +135,7 @@ export const generatePersonaResponse = async (
     }
 
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: { parts: contentParts },
       config: {
         temperature: mode === 'interview' ? 0.9 : 0.8,
@@ -152,7 +153,7 @@ export const generatePersonaResponse = async (
 interface RouterResponse {
   nextSpeakerId: string | null;
   reasoning: string;
-  shouldAdvancePhase: boolean; // "Invisible Moderator" Logic
+  shouldAdvancePhase: boolean;
 }
 
 /**
@@ -167,15 +168,14 @@ export const determineNextSpeaker = async (
   forceInterview: boolean = false
 ): Promise<RouterResponse> => {
     try {
-        // REVERTED: Sending Full History as requested (No Sliding Window)
         const recentHistory = history;
         
         const formattedHistory = recentHistory.map(msg => {
-            if (msg.type === 'system') return `[SYSTEM EVENT]: ${msg.text}`;
-            return `${personas[msg.senderId]?.name || 'User'}: ${msg.text}`;
+            if (msg.type === 'system') return `[EVENTO DO SISTEMA]: ${msg.text}`;
+            return `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`;
         }).join('\n');
         
-        // Calculate turns in current phase (distance since last System message)
+        // Calculate turns in current phase
         let turnsInCurrentPhase = 0;
         for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].type === 'system') break;
@@ -189,47 +189,41 @@ export const determineNextSpeaker = async (
         }));
 
         const prompt = `
-            You are the "Invisible Moderator" of a debate. 
+            Você é o "Moderador Invisível" de um conselho de especialistas.
             
-            Current Phase: ${phase.toUpperCase()}
-            Project Context: "${projectContext}"
-            ${forceInterview ? 'SPECIAL MODE: The user requested an interview. Select the BEST expert to ask a probing question.' : ''}
+            Fase Atual: ${phase.toUpperCase()}
+            Contexto: "${projectContext}"
+            ${forceInterview ? 'MODO ESPECIAL: O usuário pediu uma entrevista. Selecione o melhor especialista para fazer uma pergunta profunda.' : ''}
             
-            **METRICS:**
-            - Turns in current phase: ${turnsInCurrentPhase}
-            - Minimum turns required to advance: 8
+            **MÉTRICAS:**
+            - Turnos na fase atual: ${turnsInCurrentPhase}
 
-            Your Tasks:
-            1. Decide WHO speaks next.
-            2. Decide IF the discussion phase should advance automatically (Saturation Check).
+            Sua Tarefa:
+            1. Decidir QUEM fala agora.
+            2. Decidir SE a fase deve avançar automaticamente.
 
-            **PHASE ADVANCEMENT RULES (STRICT):**
-            - **DO NOT ADVANCE** if turns in current phase < 8 (unless user explicitly requested).
-            - **EXPLORATION -> SYNTHESIS:** Only advance if the topic is SATURATED. If ideas are still flowing, stay in Exploration. If arguments are repeating circularly, advance.
-            - **SYNTHESIS -> ACTION:** Only advance if a clear consensus OR a clear irreconcilable difference has been established.
-            - **ACTION:** Stay here until practical steps are clear.
-
-            Candidates:
+            **CANDIDATOS VÁLIDOS (APENAS ESTES PODEM FALAR):**
             ${JSON.stringify(candidates)}
-            
-            Recent History:
+
+            **REGRAS ESTRITAS:**
+            1. **Retorne APENAS um ID que esteja na lista de Candidatos acima.**
+            2. Se o último falante chamou alguém que NÃO está na lista (ex: chamou Freud, mas Freud não está aqui), IGNORE o chamado e escolha um candidato presente que possa responder melhor.
+            3. **Variedade:** Evite repetir o mesmo falante consecutivamente se possível.
+            4. **Silêncio:** Se a conversa parece estar concluída ou saturada, retorne nextSpeakerId como null.
+
+            Histórico Recente:
             ${formattedHistory}
             
-            Rules for Speaker Selection:
-            1. **User Input:** If the User just asked a question, pick the expert best suited to answer that SPECIFIC question. Set 'shouldAdvancePhase' to false.
-            2. **System Event:** If the last message was a System Event (Phase Change), pick someone to START the new phase.
-            3. **Variety:** Avoid picking the same person who just spoke if possible.
-            
-            Return JSON: 
+            Retorne JSON: 
             { 
-              "nextSpeakerId": "string_id" | null, 
-              "reasoning": "string",
+              "nextSpeakerId": "string_id_from_candidates" | null, 
+              "reasoning": "Por que escolheu essa pessoa?",
               "shouldAdvancePhase": boolean
             }
         `;
 
         const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: {
                 responseMimeType: 'application/json',
@@ -238,7 +232,7 @@ export const determineNextSpeaker = async (
                     properties: {
                         nextSpeakerId: { type: Type.STRING, nullable: true },
                         reasoning: { type: Type.STRING },
-                        shouldAdvancePhase: { type: Type.BOOLEAN, description: "True ONLY if we should move to the next phase immediately." }
+                        shouldAdvancePhase: { type: Type.BOOLEAN }
                     }
                 }
             }
@@ -246,18 +240,16 @@ export const determineNextSpeaker = async (
 
         const result = JSON.parse(response.text || '{}') as RouterResponse;
         
-        // Double check safety on client side
-        if (result.shouldAdvancePhase && turnsInCurrentPhase < 5) {
-            console.log("Client-side override: Too early to advance phase.");
+        // Guardrails
+        if (result.shouldAdvancePhase && turnsInCurrentPhase < 4) {
             result.shouldAdvancePhase = false;
         }
 
-        console.log(`AI Router Decision (${phase}):`, result);
         return result;
 
     } catch (error) {
         console.error("Router error:", error);
-        return { nextSpeakerId: null, reasoning: "Error", shouldAdvancePhase: false }; // Fallback handled in Orchestrator
+        return { nextSpeakerId: null, reasoning: "Error", shouldAdvancePhase: false };
     }
 }
 
@@ -270,36 +262,36 @@ export const generateActionPlan = async (
     title: string
 ): Promise<ActionPlan> => {
     try {
-        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'User'}: ${msg.text}`).join('\n');
+        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
         const prompt = `
-            Based on the discussion "${title}", create a concrete ACTION PLAN (Manifesto).
+            Com base na discussão "${title}", crie um PLANO DE AÇÃO concreto.
             
-            Conversation History (Summary):
+            Histórico da Conversa:
             ${textHistory}
             
-            Instructions:
-            - Extract practical advice and consensus.
-            - Convert them into actionable checkboxes.
-            - Create a catchy title for the plan.
-            - Limit to 3-6 high-impact items.
+            Instruções:
+            - Extraia conselhos práticos e consensos do debate.
+            - Transforme-os em itens de checklist acionáveis.
+            - Crie um título motivador.
+            - Limite a 3-6 itens de alto impacto.
         `;
 
         const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: {
                 responseMimeType: 'application/json',
                 responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                        title: { type: Type.STRING, description: "A catchy, motivating title for the plan" },
+                        title: { type: Type.STRING },
                         items: {
                             type: Type.ARRAY,
                             items: {
                                 type: Type.OBJECT,
                                 properties: {
                                     id: { type: Type.STRING },
-                                    text: { type: Type.STRING, description: "The action item text" },
+                                    text: { type: Type.STRING },
                                     completed: { type: Type.BOOLEAN }
                                 }
                             }
@@ -310,7 +302,6 @@ export const generateActionPlan = async (
         }));
 
         const result = JSON.parse(response.text || '{}') as ActionPlan;
-        // Ensure IDs exist
         if (result.items) {
             result.items.forEach((item, idx) => {
                 if (!item.id) item.id = `action-${idx}-${Date.now()}`;
@@ -330,29 +321,25 @@ export const generateActionPlan = async (
  */
 export const generateMeetingMinutes = async (history: Message[], personas: Record<string, PersonaConfig>, title: string): Promise<string> => {
     try {
-        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'User'}: ${msg.text}`).join('\n');
+        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
         const prompt = `
-            Generate structured Meeting Minutes for the session "${title}".
-            Output format: Markdown.
-            Include:
-            1. Executive Summary
-            2. Key Discussion Points (Bulleted)
-            3. Consensus Reached (if any)
-            4. Divergent Opinions (Conflicts)
-            5. Recommended Actions / Next Steps
+            Gere uma Ata de Reunião estruturada para a sessão "${title}".
+            Formato: Markdown.
+            Linguagem: Português.
+            Inclua: Sumário Executivo, Pontos Chave, Consensos, Divergências e Próximos Passos.
             
-            Conversation:
+            Conversa:
             ${textHistory}
         `;
 
         const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] }
         }));
 
-        return response.text || "# Error generating minutes";
+        return response.text || "# Erro ao gerar ata";
     } catch (e) {
-        return "# Error generating minutes";
+        return "# Erro ao gerar ata";
     }
 }
 
@@ -361,22 +348,19 @@ export const generateMeetingMinutes = async (history: Message[], personas: Recor
  */
 export const updateProjectContextFromConversation = async (currentContext: string, history: Message[], personas: Record<string, PersonaConfig>): Promise<string> => {
     try {
-        // Send FULL history for context update
-         const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'User'}: ${msg.text}`).join('\n');
+         const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
          const prompt = `
-            Based on the recent conversation, evolve and refine the Global Context/Objective of this project.
+            Com base na conversa recente, evolua o Contexto Global/Objetivo deste projeto.
+            Contexto Atual: "${currentContext}"
             
-            Current Context: "${currentContext}"
-            
-            Conversation:
+            Conversa:
             ${textHistory}
             
-            Task: Rewrite the context to reflect the new direction, discoveries, or specific focus of the group.
-            Keep it professional and concise (max 3 sentences).
+            Tarefa: Reescreva o contexto para refletir a nova direção ou descobertas. Máximo 3 frases.
          `;
          
          const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] }
         }));
         
@@ -386,12 +370,10 @@ export const updateProjectContextFromConversation = async (currentContext: strin
     }
 }
 
-// --- Existing helper functions ---
 export const generateAvatar = async (name: string, role: string, description: string): Promise<string | null> => {
   try {
     const prompt = `A high-quality, digital art style portrait avatar of a character named ${name}, who is a ${role}. 
-    Description: ${description}. 
-    The image should be a square close-up face shot.`;
+    Description: ${description}. Square close-up face shot.`;
 
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -415,14 +397,14 @@ export const generateAvatar = async (name: string, role: string, description: st
 export const generateConversationStarters = async (title: string, context: string): Promise<string[]> => {
   try {
     const prompt = `
-      Generate 5 thought-provoking conversation starter questions (in Portuguese) for a discussion panel.
-      Project Title: "${title}"
-      Context/Objective: "${context}"
-      IMPORTANT: Keep the questions concise and short (maximum 15 words each).
+      Gere 5 perguntas provocativas (em Português) para iniciar uma discussão.
+      Título: "${title}"
+      Contexto: "${context}"
+      Máximo 15 palavras por pergunta.
     `;
 
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: 'application/json',
@@ -441,14 +423,12 @@ export const generateConversationStarters = async (title: string, context: strin
 export const refineProjectContext = async (originalText: string): Promise<string> => {
   try {
     const prompt = `
-      Act as a prompt engineer and professional editor.
-      Rewrite the following "Global Context" description to be clearer, more objective, and inspiring for AI personas participating in a council.
-      Original Text: "${originalText}"
-      Goal: The output will be used as the context setting for a group of AI experts.
-      Language: Portuguese (Brazil).
+      Atue como um editor profissional. Melhore este texto de "Contexto Global" para ser mais claro e inspirador para IAs especialistas.
+      Texto: "${originalText}"
+      Linguagem: Português.
     `;
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: { parts: [{ text: prompt }] },
     }));
     return response.text?.trim() || originalText;
