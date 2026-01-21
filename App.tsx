@@ -19,6 +19,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [connectionError, setConnectionError] = useState<{isError: boolean, msg: string}>({ isError: false, msg: '' });
+  const hasLoadedOnceRef = useRef(false);
+  const lastSyncAtRef = useRef(0);
 
   // --- Global App State ---
   const [dashboardTheme, setDashboardTheme] = useState<ThemeId>('sand');
@@ -43,8 +45,15 @@ const App: React.FC = () => {
   const activeProject = projects.find(p => p.id === currentProjectId);
   
   // --- INITIAL DATA LOADING ---
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadData = async (options: { allowCooldown?: boolean } = {}) => {
+    const { allowCooldown = false } = options;
+    const now = Date.now();
+    if (allowCooldown && now - lastSyncAtRef.current < 60_000) {
+      return;
+    }
+
+    const shouldSetLoading = !hasLoadedOnceRef.current && !isLoading;
+    if (shouldSetLoading) setIsLoading(true);
     setIsSyncing(true);
     setConnectionError({ isError: false, msg: '' });
     
@@ -73,8 +82,10 @@ const App: React.FC = () => {
       console.error("Failed to load initial data", error);
       addToast("Erro ao sincronizar dados com a nuvem.", "error");
     } finally {
-      setIsLoading(false);
+      if (shouldSetLoading) setIsLoading(false);
       setIsSyncing(false);
+      hasLoadedOnceRef.current = true;
+      lastSyncAtRef.current = Date.now();
     }
   };
 
@@ -85,8 +96,10 @@ const App: React.FC = () => {
       setAuthInitialized(true);
       
       if (user) {
-        loadData();
+        loadData({ allowCooldown: hasLoadedOnceRef.current });
       } else {
+        hasLoadedOnceRef.current = false;
+        lastSyncAtRef.current = 0;
         storageService.getTheme().then(theme => {
             setDashboardTheme(theme);
             setActiveTheme(theme);

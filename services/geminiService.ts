@@ -14,7 +14,7 @@ async function callWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000)
     return await fn();
   } catch (error: any) {
     const isRateLimit = error?.status === 429 || error?.code === 429 || error?.status === 'RESOURCE_EXHAUSTED' || error?.message?.includes('429');
-    
+
     if (retries > 0 && isRateLimit) {
       console.warn(`Rate limit hit (429). Retrying in ${delay}ms...`);
       await wait(delay);
@@ -43,10 +43,10 @@ export const generatePersonaResponse = async (
     // Check if the very last message has attachments
     const lastMessage = recentHistory[recentHistory.length - 1];
     const hasAttachments = lastMessage?.attachments && lastMessage.attachments.length > 0;
-    
+
     // Identify who spoke last to encourage interaction
     const isUserLast = lastMessage.senderId === 'user';
-    
+
     // Create a list of who is actually in the room to prevent hallucinations
     const presentColleagues = activePersonaIds
       .filter(id => id !== targetPersona.id)
@@ -56,7 +56,7 @@ export const generatePersonaResponse = async (
     // Full History formatting
     const formattedHistory = recentHistory.map(msg => {
       if (msg.type === 'system') {
-          return `[EVENTO DO SISTEMA]: ${msg.text}`;
+        return `[EVENTO DO SISTEMA]: ${msg.text}`;
       }
       const name = personas[msg.senderId]?.name || 'Usuário';
       const attInfo = msg.attachments?.length ? `[Anexo: ${msg.attachments.map(a => a.name).join(', ')}]` : '';
@@ -67,7 +67,7 @@ export const generatePersonaResponse = async (
 
     let specialInstruction = "";
     if (mode === 'interview') {
-        specialInstruction = `
+      specialInstruction = `
         *** MODO ENTREVISTA ATIVO ***
         SEU OBJETIVO: Você NÃO está aqui para dar conselhos agora. Você precisa entender o Usuário mais profundamente.
         TAREFA: Faça UMA única pergunta provocativa e profunda baseada na sua especialidade para obter mais contexto do Usuário.
@@ -121,25 +121,25 @@ export const generatePersonaResponse = async (
 
     // If the last message has attachments, add them as inlineData parts
     if (hasAttachments && lastMessage.attachments) {
-       lastMessage.attachments.forEach(att => {
-         const base64Data = att.data.split(',')[1];
-         if (base64Data) {
-           contentParts.push({
-             inlineData: {
-               mimeType: att.mimeType,
-               data: base64Data
-             }
-           });
-         }
-       });
+      lastMessage.attachments.forEach(att => {
+        const base64Data = att.data.split(',')[1];
+        if (base64Data) {
+          contentParts.push({
+            inlineData: {
+              mimeType: att.mimeType,
+              data: base64Data
+            }
+          });
+        }
+      });
     }
 
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: { parts: contentParts },
       config: {
         temperature: mode === 'interview' ? 0.9 : 0.8,
-        tools: [{googleSearch: {}}]
+        tools: [{ googleSearch: {} }]
       }
     }));
 
@@ -167,28 +167,28 @@ export const determineNextSpeaker = async (
   phase: ProjectPhase = 'exploration',
   forceInterview: boolean = false
 ): Promise<RouterResponse> => {
-    try {
-        const recentHistory = history;
-        
-        const formattedHistory = recentHistory.map(msg => {
-            if (msg.type === 'system') return `[EVENTO DO SISTEMA]: ${msg.text}`;
-            return `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`;
-        }).join('\n');
-        
-        // Calculate turns in current phase
-        let turnsInCurrentPhase = 0;
-        for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].type === 'system') break;
-            if (history[i].senderId !== 'user') turnsInCurrentPhase++;
-        }
+  try {
+    const recentHistory = history;
 
-        const candidates = activePersonaIds.map(id => ({
-            id,
-            name: personas[id]?.name,
-            role: personas[id]?.role
-        }));
+    const formattedHistory = recentHistory.map(msg => {
+      if (msg.type === 'system') return `[EVENTO DO SISTEMA]: ${msg.text}`;
+      return `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`;
+    }).join('\n');
 
-        const prompt = `
+    // Calculate turns in current phase
+    let turnsInCurrentPhase = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].type === 'system') break;
+      if (history[i].senderId !== 'user') turnsInCurrentPhase++;
+    }
+
+    const candidates = activePersonaIds.map(id => ({
+      id,
+      name: personas[id]?.name,
+      role: personas[id]?.role
+    }));
+
+    const prompt = `
             Você é o "Moderador Invisível" de um conselho de especialistas.
             
             Fase Atual: ${phase.toUpperCase()}
@@ -222,48 +222,48 @@ export const determineNextSpeaker = async (
             }
         `;
 
-        const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { parts: [{ text: prompt }] },
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        nextSpeakerId: { type: Type.STRING, nullable: true },
-                        reasoning: { type: Type.STRING },
-                        shouldAdvancePhase: { type: Type.BOOLEAN }
-                    }
-                }
-            }
-        }));
-
-        const result = JSON.parse(response.text || '{}') as RouterResponse;
-        
-        // Guardrails
-        if (result.shouldAdvancePhase && turnsInCurrentPhase < 4) {
-            result.shouldAdvancePhase = false;
+    const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            nextSpeakerId: { type: Type.STRING, nullable: true },
+            reasoning: { type: Type.STRING },
+            shouldAdvancePhase: { type: Type.BOOLEAN }
+          }
         }
+      }
+    }));
 
-        return result;
+    const result = JSON.parse(response.text || '{}') as RouterResponse;
 
-    } catch (error) {
-        console.error("Router error:", error);
-        return { nextSpeakerId: null, reasoning: "Error", shouldAdvancePhase: false };
+    // Guardrails
+    if (result.shouldAdvancePhase && turnsInCurrentPhase < 4) {
+      result.shouldAdvancePhase = false;
     }
+
+    return result;
+
+  } catch (error) {
+    console.error("Router error:", error);
+    return { nextSpeakerId: null, reasoning: "Error", shouldAdvancePhase: false };
+  }
 }
 
 /**
  * ACTION PLAN GENERATOR (Artifacts)
  */
 export const generateActionPlan = async (
-    history: Message[], 
-    personas: Record<string, PersonaConfig>, 
-    title: string
+  history: Message[],
+  personas: Record<string, PersonaConfig>,
+  title: string
 ): Promise<ActionPlan> => {
-    try {
-        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
-        const prompt = `
+  try {
+    const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
+    const prompt = `
             Com base na discussão "${title}", crie um PLANO DE AÇÃO concreto.
             
             Histórico da Conversa:
@@ -276,53 +276,53 @@ export const generateActionPlan = async (
             - Limite a 3-6 itens de alto impacto.
         `;
 
-        const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { parts: [{ text: prompt }] },
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        title: { type: Type.STRING },
-                        items: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    id: { type: Type.STRING },
-                                    text: { type: Type.STRING },
-                                    completed: { type: Type.BOOLEAN }
-                                }
-                            }
-                        }
-                    }
+    const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                  completed: { type: Type.BOOLEAN }
                 }
+              }
             }
-        }));
-
-        const result = JSON.parse(response.text || '{}') as ActionPlan;
-        if (result.items) {
-            result.items.forEach((item, idx) => {
-                if (!item.id) item.id = `action-${idx}-${Date.now()}`;
-                if (item.completed === undefined) item.completed = false;
-            });
+          }
         }
-        return result;
+      }
+    }));
 
-    } catch (e) {
-        console.error("Error generating action plan", e);
-        return { title: "Plano de Ação", items: [] };
+    const result = JSON.parse(response.text || '{}') as ActionPlan;
+    if (result.items) {
+      result.items.forEach((item, idx) => {
+        if (!item.id) item.id = `action-${idx}-${Date.now()}`;
+        if (item.completed === undefined) item.completed = false;
+      });
     }
+    return result;
+
+  } catch (e) {
+    console.error("Error generating action plan", e);
+    return { title: "Plano de Ação", items: [] };
+  }
 }
 
 /**
  * MEETING MINUTES
  */
 export const generateMeetingMinutes = async (history: Message[], personas: Record<string, PersonaConfig>, title: string): Promise<string> => {
-    try {
-        const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
-        const prompt = `
+  try {
+    const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
+    const prompt = `
             Gere uma Ata de Reunião estruturada para a sessão "${title}".
             Formato: Markdown.
             Linguagem: Português.
@@ -332,24 +332,24 @@ export const generateMeetingMinutes = async (history: Message[], personas: Recor
             ${textHistory}
         `;
 
-        const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { parts: [{ text: prompt }] }
-        }));
+    const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] }
+    }));
 
-        return response.text || "# Erro ao gerar ata";
-    } catch (e) {
-        return "# Erro ao gerar ata";
-    }
+    return response.text || "# Erro ao gerar ata";
+  } catch (e) {
+    return "# Erro ao gerar ata";
+  }
 }
 
 /**
  * META-CONTEXT
  */
 export const updateProjectContextFromConversation = async (currentContext: string, history: Message[], personas: Record<string, PersonaConfig>): Promise<string> => {
-    try {
-         const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
-         const prompt = `
+  try {
+    const textHistory = history.map(msg => `${personas[msg.senderId]?.name || 'Usuário'}: ${msg.text}`).join('\n');
+    const prompt = `
             Com base na conversa recente, evolua o Contexto Global/Objetivo deste projeto.
             Contexto Atual: "${currentContext}"
             
@@ -358,16 +358,16 @@ export const updateProjectContextFromConversation = async (currentContext: strin
             
             Tarefa: Reescreva o contexto para refletir a nova direção ou descobertas. Máximo 3 frases.
          `;
-         
-         const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { parts: [{ text: prompt }] }
-        }));
-        
-        return response.text || currentContext;
-    } catch (e) {
-        return currentContext;
-    }
+
+    const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [{ text: prompt }] }
+    }));
+
+    return response.text || currentContext;
+  } catch (e) {
+    return currentContext;
+  }
 }
 
 export const generateAvatar = async (name: string, role: string, description: string): Promise<string | null> => {
@@ -404,7 +404,7 @@ export const generateConversationStarters = async (title: string, context: strin
     `;
 
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: 'application/json',
@@ -428,7 +428,7 @@ export const refineProjectContext = async (originalText: string): Promise<string
       Linguagem: Português.
     `;
     const response = await callWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: { parts: [{ text: prompt }] },
     }));
     return response.text?.trim() || originalText;

@@ -4,7 +4,7 @@ import { Project, PersonaConfig, Message, ThemeId } from '../types';
 import { STORAGE_KEYS, INITIAL_PERSONAS, INITIAL_PROJECTS, USER_ID } from '../constants';
 
 export const storageService = {
-  
+
   // --- AUTHENTICATION ---
   initAuth: (callback: (user: any | null) => void) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -56,29 +56,29 @@ export const storageService = {
     if (!user) return;
 
     try {
-        // 1. Seed Personas (Globais)
-        const { data: existingPersonas } = await supabase.from('personas').select('id').limit(1);
-        if (!existingPersonas || existingPersonas.length === 0) {
-            console.log("Seeding personas...");
-            const personaPayload = Object.values(INITIAL_PERSONAS);
-            await supabase.from('personas').upsert(personaPayload);
-        }
+      // 1. Seed Personas (Globais)
+      const { data: existingPersonas } = await supabase.from('personas').select('id').limit(1);
+      if (!existingPersonas || existingPersonas.length === 0) {
+        console.log("Seeding personas...");
+        const personaPayload = Object.values(INITIAL_PERSONAS);
+        await supabase.from('personas').upsert(personaPayload);
+      }
 
-        // 2. Seed Projects (Específicos do Usuário)
-        const { data: existingProjects } = await supabase.from('projects').select('id').eq('ownerId', user.id).limit(1);
-        if (!existingProjects || existingProjects.length === 0) {
-            console.log("Seeding initial projects for user:", user.id);
-            const projectsPayload = INITIAL_PROJECTS.map(p => ({
-                ...p,
-                ownerId: user.id,
-                // Garantimos que o ID seja único para o usuário para evitar conflitos de RLS
-                id: `${p.id}_${user.id.substring(0, 8)}` 
-            }));
-            const { error: pError } = await supabase.from('projects').upsert(projectsPayload);
-            if (pError) throw pError;
-        }
+      // 2. Seed Projects (Específicos do Usuário)
+      const { data: existingProjects } = await supabase.from('projects').select('id').eq('ownerId', user.id).limit(1);
+      if (!existingProjects || existingProjects.length === 0) {
+        console.log("Seeding initial projects for user:", user.id);
+        const projectsPayload = INITIAL_PROJECTS.map(p => ({
+          ...p,
+          ownerId: user.id,
+          // Garantimos que o ID seja único para o usuário para evitar conflitos de RLS
+          id: `${p.id}_${user.id.substring(0, 8)}`
+        }));
+        const { error: pError } = await supabase.from('projects').upsert(projectsPayload);
+        if (pError) throw pError;
+      }
     } catch (err) {
-        console.error("Error during seeding:", err);
+      console.error("Error during seeding:", err);
     }
   },
 
@@ -95,16 +95,16 @@ export const storageService = {
     try {
       const { data, error } = await supabase.from('personas').select('*');
       if (error) throw error;
-      
+
       const personas: Record<string, PersonaConfig> = {};
       if (data && data.length > 0) {
-          data.forEach(p => {
-            personas[p.id] = p as PersonaConfig;
-          });
+        data.forEach(p => {
+          personas[p.id] = p as PersonaConfig;
+        });
       } else {
-          return INITIAL_PERSONAS;
+        return INITIAL_PERSONAS;
       }
-      
+
       if (!personas[USER_ID]) personas[USER_ID] = INITIAL_PERSONAS[USER_ID];
       return personas;
     } catch (e) {
@@ -118,19 +118,19 @@ export const storageService = {
     const { error } = await supabase.from('personas').upsert(payload);
     if (error) console.error("Erro ao salvar personas:", error);
   },
-  
+
   // --- SETTINGS ---
   getPersonaOrder: async (): Promise<string[]> => {
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
     if (!user) return Object.keys(INITIAL_PERSONAS).filter(id => id !== USER_ID);
-    
+
     const { data, error } = await supabase
       .from('settings')
       .select('value')
       .eq('key', `order_${user.id}`)
-      .single();
-      
+      .maybeSingle();
+
     return data?.value?.order ?? Object.keys(INITIAL_PERSONAS).filter(id => id !== USER_ID);
   },
 
@@ -158,8 +158,8 @@ export const storageService = {
       .order('lastActiveAt', { ascending: false });
 
     if (error) {
-        console.error("Error fetching projects:", error);
-        return [];
+      console.error("Error fetching projects:", error);
+      return [];
     }
     return data as Project[];
   },
@@ -168,12 +168,12 @@ export const storageService = {
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
     if (!user) return;
-    
+
     const projectWithOwner = { ...project, ownerId: user.id };
     const { error } = await supabase.from('projects').upsert(projectWithOwner);
     if (error) {
-        console.error("Error saving project:", error);
-        throw error;
+      console.error("Error saving project:", error);
+      throw error;
     }
   },
 
@@ -181,7 +181,7 @@ export const storageService = {
     const { error } = await supabase.from('projects').delete().eq('id', projectId);
     if (error) throw error;
   },
-  
+
   // --- MENSAGENS ---
   getMessages: async (projectId: string): Promise<Message[]> => {
     const { data, error } = await supabase
@@ -191,25 +191,25 @@ export const storageService = {
       .order('timestamp', { ascending: true });
 
     if (error) {
-        console.error("Error fetching messages:", error);
-        return [];
+      console.error("Error fetching messages:", error);
+      return [];
     }
     return data as Message[];
   },
-  
+
   saveMessages: async (projectId: string, messages: Message[]) => {
     if (!messages.length) return;
-    
+
     // Filtramos para salvar apenas o diferencial ou usamos upsert no array todo
-    const messagesWithRef = messages.map(m => ({ 
-      ...m, 
-      project_id: projectId 
+    const messagesWithRef = messages.map(m => ({
+      ...m,
+      project_id: projectId
     }));
-    
+
     const { error } = await supabase.from('messages').upsert(messagesWithRef);
     if (error) console.error("Erro ao salvar mensagens no Supabase:", error);
   },
-  
+
   clearMessages: async (projectId: string) => {
     const { error } = await supabase.from('messages').delete().eq('project_id', projectId);
     if (error) console.error("Error clearing messages:", error);
